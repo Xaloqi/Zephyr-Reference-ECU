@@ -101,6 +101,24 @@ option(DIAG_DOIP_ONLY_BUILD
     OFF
 )
 
+# ---------------------------------------------------------------------------
+# Option: secure boot (Phase 4) — MCUboot image-policy gate on the CAN build
+#
+# Adds EDS's flash-ops + MCUboot image-policy sources and the boot-confirm /
+# image-policy-registration calls in src/main.c (both guarded by the
+# DIAG_SECURE_BOOT_BUILD compile definition this sets). Requires building
+# and flashing MCUboot itself separately, and the MCUboot-aware partition
+# table in boards/nucleo_h753zi_secureboot.overlay — see README.md "Phase 4".
+#
+# Scoped to exactly what EDS ships today: MCUboot swap, image-policy gate,
+# fail-closed production guard. Firmware authenticity / anti-rollback
+# (EDS#319) is open upstream and explicitly excluded.
+# ---------------------------------------------------------------------------
+option(DIAG_SECURE_BOOT_BUILD
+    "Add MCUboot image-policy support (requires MCUboot built and flashed separately)"
+    OFF
+)
+
 if(NOT DIAG_SKIP_CODEGEN AND NOT EXISTS "${DIAG_ROOT}/tools/templates")
     message(STATUS
         "[REF-ECU] Commercial tools/templates/ not present (expected — this "
@@ -260,6 +278,19 @@ else()
         ${DIAG_ROOT}/platform/zephyr/zephyr_timer.c
         ${DIAG_ROOT}/platform/zephyr/zephyr_wdt.c
     )
+    if(DIAG_SECURE_BOOT_BUILD)
+        target_sources(app PRIVATE
+            # Called from generated/uds_init.c (zephyr_flash_ops_init())
+            ${DIAG_ROOT}/platform/zephyr/zephyr_flash_ops.c
+            # Called from src/main.c (zephyr_mcuboot_image_policy_init())
+            ${DIAG_ROOT}/platform/zephyr/zephyr_mcuboot_image_policy.c
+            # Streaming SHA-256 + MCUboot header/TLV parser — used by the
+            # image-policy digest check above
+            ${DIAG_ROOT}/platform/uds_sha256.c
+            ${DIAG_ROOT}/platform/uds_mcuboot_image.c
+        )
+        target_compile_definitions(app PRIVATE DIAG_SECURE_BOOT_BUILD=1)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------

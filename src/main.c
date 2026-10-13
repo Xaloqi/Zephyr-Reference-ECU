@@ -48,6 +48,11 @@
 #include "zephyr_timer.h"
 #include "zephyr_wdt.h"
 #include "nvm_store.h"
+#if defined(DIAG_SECURE_BOOT_BUILD)
+#include "zephyr_flash_ops.h"              /* zephyr_flash_ops_set_wdt() */
+#include "zephyr_mcuboot_image_policy.h"   /* zephyr_mcuboot_image_policy_init() */
+#include <zephyr/dfu/mcuboot.h>            /* boot_is_img_confirmed() et al. */
+#endif
 
 /* --------------------------------------------------------------------------
  * Generated headers (from diagnostics_config.yaml via EDS's codegen.py)
@@ -262,6 +267,16 @@ int main(void)
 
     (void)diag_wdt_init(&s_wdt);
 
+#if defined(DIAG_SECURE_BOOT_BUILD)
+    /* [EDS#312] Give the flash-ops layer the same watchdog instance so its
+     * chunked erase_step_cb() can bridge the watchdog across one bounded
+     * sector-erase call -- STM32H7 flash sector erase can block up to
+     * ~4000 ms, far past this build's 100 ms watchdog window. Must run
+     * before uds_generated_init() below, which calls zephyr_flash_ops_init().
+     * Adapted verbatim from EDS's own examples/safeboot_ecu/src/main.c. */
+    zephyr_flash_ops_set_wdt(&s_wdt);
+#endif
+
     status = diag_timer_init(&s_tick_timer, on_tick, NULL);
     if (status != UDS_STATUS_OK) { LOG_ERR("Timer init failed."); return -1; }
 
@@ -352,6 +367,46 @@ int main(void)
     LOG_INF("UDS stack ready: %u DIDs  %u DTCs  RX=0x%03X TX=0x%03X",
             (unsigned)GEN_DID_COUNT, (unsigned)GEN_DTC_COUNT,
             (unsigned)DIAG_RX_CAN_ID, (unsigned)DIAG_TX_CAN_ID);
+
+#if defined(DIAG_SECURE_BOOT_BUILD)
+    /*
+     * MCUboot image confirmation — adapted verbatim from EDS's own
+     * examples/safeboot_ecu/src/main.c. Non-fatal by design: a defective
+     * image that cannot confirm itself rolls back to the previous slot on
+     * the next reset, which is the correct safety behaviour, not a bug to
+     * work around.
+     */
+    {
+        if (!boot_is_img_confirmed()) {
+            int boot_rc = boot_write_img_confirmed();
+            if (boot_rc == 0) {
+                LOG_INF("[OTA] New image confirmed — rollback guard cleared.");
+            } else {
+                LOG_ERR("[OTA] boot_write_img_confirmed() err %d — "
+                        "MCUboot will roll back on next reset.", boot_rc);
+            }
+        }
+    }
+
+    /*
+     * DFU image policy registration — must happen before the diag thread
+     * starts accepting CAN traffic, or 0x34 RequestDownload proceeds with
+     * no policy. Non-fatal: diagnostics still start, DFU is simply
+     * unavailable this power cycle (same posture as a failed NVM init
+     * above).
+     */
+    status = zephyr_mcuboot_image_policy_init();
+    if (status != UDS_STATUS_OK) {
+        LOG_ERR("[DFU] Image policy registration failed: 0x%02X — "
+                "0x34 RequestDownload will be refused.", (unsigned)status);
+    } else {
+        LOG_INF("[DFU] Image policy registered (SHA-256 digest verify, "
+                "boot_request_upgrade on accept). Authenticity comes "
+                "entirely from MCUboot's own RSA-2048-PSS signature check "
+                "-- see README.md \"Phase 4\" before treating this as more "
+                "than that.");
+    }
+#endif /* DIAG_SECURE_BOOT_BUILD */
 
     (void)k_thread_create(
         &s_diag_thread, s_diag_stack,
