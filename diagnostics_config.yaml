@@ -102,6 +102,27 @@ dids:
     write_security_level: 1
     data_length: 4   # uint32, big-endian
 
+  # ── CDA-interop-only (Phase 3) ────────────────────────────────────────────
+  # Identification (ISO 14229-1 manufacturer-specific identification option
+  # range, 0xF100-0xF17F). Real, general capability: a fixed compile-time
+  # value (tools/codegen.py's 'default_value' DID field) — not app logic.
+  # The specific value 0xFF0000 is chosen because it's exactly what the
+  # Eclipse OpenSOVD CDA's own shipped FLXC1000.mdd test fixture
+  # pattern-matches to select that ECU's Boot_Variant, the variant that
+  # exposes SecurityAccess. Without it, the CDA has no SecurityAccess
+  # service to route to over SOVD. Same disclosed choice EDS's own
+  # examples/basic_ecu_cda_demo makes, for the identical reason — see
+  # README.md "Phase 3" and that example's own README.md.
+  - id:   "0xF100"
+    name: "Identification"
+    access:
+      - read
+    min_session: "default"
+    read_security_level:  0
+    write_security_level: 0
+    data_length: 3
+    default_value: "0xFF0000"
+
 dtcs:
   - code:        "0x041064"
     description: "Door ajar timeout — a door reported open while the body controller is in the locked state, continuously, past the monitor's grace period"
@@ -125,3 +146,19 @@ routines:
     min_session:    "extended"
     security_level: 1
     support:        ["start", "results"]
+
+  # CDA-interop-only (Phase 3). Real RoutineControl Start capability, at an
+  # ID chosen to equal the ID the CDA's own shipped FLXC1000.mdd fixture
+  # declares for its "SelfTest" operation. SOVD resolves /operations/<name>
+  # against whatever ODX database the CDA has loaded, not against anything
+  # this ECU reports on the wire — exercising RoutineControl through the
+  # CDA's SOVD API requires this ID to line up with the fixture, not with
+  # this ECU's own DoorLockAll/WindowCalibrate IDs (which the fixture
+  # doesn't know about and can't route to). Same disclosed choice EDS's own
+  # examples/basic_ecu_cda_demo makes — see README.md "Phase 3".
+  - id:   "0x1001"
+    name: "SelfTest"
+    description: "CDA-interop stub — ID chosen to match the CDA's own shipped fixture, see README.md Phase 3"
+    min_session:    "extended"
+    security_level: 0
+    support:        ["start"]

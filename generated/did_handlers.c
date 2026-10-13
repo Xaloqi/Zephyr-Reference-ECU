@@ -5,7 +5,7 @@
  *
  * ECU       : ReferenceBCM
  * Version   : 0.1.0
- * Generated : 2026-10-13T18:43:55Z
+ * Generated : 2026-10-13T20:47:59Z
  *
  * PURPOSE: DID read/write handler stubs and static DID registration table.
  *          Each handler returns deterministic stub data (zeros) until the
@@ -74,6 +74,10 @@ static uint8_t s_mock_bcm_windowposition_pct[1U] = { 0U };
 /** Stub backing store for DID 0x0412 — BCM_DoorCycleCount (4 byte(s)). */
 /* TODO [APPLICATION]: Replace with real data source for 'BCM_DoorCycleCount'. */
 static uint8_t s_mock_bcm_doorcyclecount[4U] = { 0U };
+
+/** Stub backing store for DID 0xF100 — Identification (3 byte(s)). */
+/* TODO [APPLICATION]: Replace with real data source for 'Identification'. */
+static uint8_t s_mock_identification[3U] = { 0xFFU, 0x00U, 0x00U };
 
 
 /* =============================================================================
@@ -333,6 +337,47 @@ uds_status_t did_read_bcm_doorcyclecount(
     return UDS_STATUS_OK;
 }
 
+/**
+ * @brief Read handler for DID 0xF100 — Identification.
+ *
+ * Stub: copies 3 zero byte(s) into buf.
+ *
+ * MIN SESSION  : UDS_SESSION_DEFAULT
+ * SEC LEVEL    : 0
+ * DATA LENGTH  : 3 byte(s)
+ *
+ * TODO [APPLICATION]: Replace the memcpy below with real data access.
+ *   Example: read from NVM or driver:
+ *     (void)memcpy(buf, real_data_source_for_identification, 3U);
+ *     *out_len = 3U;
+ *
+ * @param[out] buf      Buffer to receive DID data (caller-allocated).
+ * @param[in]  buf_len  Capacity of buf in bytes. Must be >= 3.
+ * @param[out] out_len  Set to number of bytes written on success.
+ * @return UDS_STATUS_OK on success.
+ * @return UDS_STATUS_ERR_NULL_PTR if buf or out_len is NULL.
+ * @return UDS_STATUS_ERR_BUFFER_OVERFLOW if buf_len < 3.
+ */
+uds_status_t did_read_identification(
+    uint8_t  *buf,
+    uint16_t  buf_len,
+    uint16_t *out_len)
+{
+    if ((buf == NULL) || (out_len == NULL)) {
+        return UDS_STATUS_ERR_NULL_PTR;
+    }
+
+    if (buf_len < (uint16_t)3U) {
+        return UDS_STATUS_ERR_BUFFER_OVERFLOW;
+    }
+
+    /* TODO [APPLICATION]: Replace with real sensor/NVM access for Identification. */
+    (void)memcpy(buf, s_mock_identification, (size_t)3U);
+    *out_len = (uint16_t)3U;
+
+    return UDS_STATUS_OK;
+}
+
 
 /* =============================================================================
  * DID Write handlers
@@ -556,6 +601,20 @@ static const did_entry_t s_generated_did_table[GEN_DID_HANDLER_COUNT] = {
         .read_cb            = did_read_bcm_doorcyclecount,
         .write_cb           = did_write_bcm_doorcyclecount,
         .description        = "BCM_DoorCycleCount"
+    },
+    /* ── DID 0xF100 — Identification ─────────────────────────────────────────── */
+    {
+        .did_id             = (uint16_t)61696U,
+        .access_flags       = (uint8_t)(
+                                  DID_ACCESS_READ
+                              ),
+        .min_session        = (uint8_t)UDS_SESSION_DEFAULT,
+        .read_access_level  = (uint8_t)0U,
+        .write_access_level = (uint8_t)0U,
+        .data_length        = (uint16_t)3U,
+        .read_cb            = did_read_identification,
+        .write_cb           = NULL,
+        .description        = "Identification"
     }
 };
 
@@ -570,7 +629,7 @@ static const did_entry_t s_generated_did_table[GEN_DID_HANDLER_COUNT] = {
  * each entry. Must be called from uds_generated_init() after did_database_init()
  * and before any UDS request processing.
  *
- * @return UDS_STATUS_OK if all 6 DID(s) registered successfully.
+ * @return UDS_STATUS_OK if all 7 DID(s) registered successfully.
  * @return UDS_STATUS_ERR_ALREADY_INITIALIZED if database already contains this DID.
  * @return UDS_STATUS_ERR_* on other registration failure.
  */

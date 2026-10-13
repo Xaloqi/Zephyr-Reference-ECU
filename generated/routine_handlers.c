@@ -4,8 +4,10 @@
 // [APP HOOK] marker is exactly what to re-apply if this file is ever
 // regenerated from the YAML — see src/bcm_state.h and README.md, and the
 // configure-time check in CMakeLists.txt that fails loudly if a marker
-// goes missing after a regeneration.
-// ECU: ReferenceBCM  v0.1.0  Generated: 2026-10-13T18:43:55Z
+// goes missing. RID 0x1001 (SelfTest) is a disclosed CDA-interop stub
+// (Phase 3, README.md) and is deliberately left as a plain generated
+// no-op — it carries no application logic by design.
+// ECU: ReferenceBCM  v0.1.0  Generated: 2026-10-13T20:48:00Z
 
 #include "routine_handlers.h"
 #include "routine_database.h"
@@ -44,6 +46,18 @@ uds_status_t routine_results_windowcalibrate(
     return bcm_state_windowcal_results(result_buf, result_buf_len, result_len);
 }
 
+/* RID 0x1001 — SelfTest : startRoutine stub */
+uds_status_t routine_start_selftest(
+    const uint8_t *opt_buf, uint8_t opt_len,
+    uint8_t *result_buf, uint8_t result_buf_len, uint8_t *result_len)
+{
+    (void)opt_buf; (void)opt_len; (void)result_buf;
+    (void)result_buf_len;
+    *result_len = 0U;
+    /* TODO: implement routine logic */
+    return UDS_STATUS_OK;
+}
+
 /* Register all routines with routine_database */
 uds_status_t routine_handlers_register_all(void)
 {
@@ -71,6 +85,18 @@ uds_status_t routine_handlers_register_all(void)
     entry.stop_cb        = NULL;
     entry.results_cb     = routine_results_windowcalibrate;
     entry.description    = "WindowCalibrate";
+    status = routine_database_register(&entry);
+    if (status != UDS_STATUS_OK) { return status; }
+
+    /* RID 0x1001 — SelfTest */
+    entry.rid            = (uint16_t)4097U;
+    entry.support_flags  = (uint8_t)(ROUTINE_SUPPORT_START);
+    entry.min_session    = (uint8_t)UDS_SESSION_EXTENDED;
+    entry.security_level = (uint8_t)0U;
+    entry.start_cb       = routine_start_selftest;
+    entry.stop_cb        = NULL;
+    entry.results_cb     = NULL;
+    entry.description    = "SelfTest";
     status = routine_database_register(&entry);
     if (status != UDS_STATUS_OK) { return status; }
 

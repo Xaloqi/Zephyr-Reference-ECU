@@ -5,7 +5,7 @@
  *
  * ECU       : ReferenceBCM
  * Version   : 0.1.0
- * Generated : 2026-10-13T18:43:55Z
+ * Generated : 2026-10-13T20:48:00Z
  * ASIL Level: B
  *
  * PURPOSE: Compile-time ASIL safety configuration constants.
@@ -118,7 +118,7 @@
 #define GEN_SAFETY_DTC_SUPPORT_MASK   (0xFFU)
 
 /** Number of DIDs declared in diagnostics_config.yaml. */
-#define GEN_SAFETY_DID_COUNT          (6U)
+#define GEN_SAFETY_DID_COUNT          (7U)
 
 /* =============================================================================
  * Override uds_safety.h compile-time gates with generated values.
