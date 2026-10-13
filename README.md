@@ -331,17 +331,34 @@ on `native_sim` (`UDS stack ready: 7 DIDs 2 DTCs`, DoIP listening on port
 13400).
 
 **Not confirmed, disclosed rather than hidden**: on real `nucleo_h753zi`
-hardware, this build hangs early in boot — before the firmware's own
-first log line, with JP6/JP7 set and a live Ethernet link to the host.
-Confirmed genuinely hung, not a cable or baud-rate artifact (both checked
-directly): a program-counter trace across repeated halt/resume cycles
-shows execution reaching a fixed address and then **never advancing
-again** on subsequent samples — a tight loop, not a crash, most likely
-inside the Ethernet/PHY init sequence that runs automatically before
-`main()`. Root-causing a stuck MDIO/RMII sequence needs a scope or logic
-analyzer on the bus, which is bench work, not something resolved by more
-flash/reset cycles — parked here as an open, disclosed limitation rather
-than guessed at further.
+hardware, this build produces no console output at all — before the
+firmware's own first log line, with JP6/JP7 set and a live Ethernet link
+to the host. Not a cable or baud-rate artifact (both checked directly).
+
+Diagnosed as far as remote probing over ST-LINK/OpenOCD can honestly take
+it, and the findings disagree with each other rather than converging:
+
+- A 25-sample program-counter trace (explicit resume → run 100 ms → halt
+  → read PC, repeated) landed on the **exact same address** every time
+  across 2.5 real seconds — the signature of a genuine stall, not normal
+  idling (the address resolves into Zephyr's own `arch_cpu_idle`, but
+  healthy idling still shows *some* PC variation from periodic tick
+  interrupts; this showed none).
+- Checking whether the system tick timer was even advancing gave a
+  **contradictory** result: a register read taken while the core was
+  (unintentionally) still halted from the prior test showed it frozen —
+  not real evidence, just a confounded test. Redone properly (explicit
+  resume, then read), the timer's value had genuinely changed, arguing
+  *against* a true stall. A second read in that same sequence then failed
+  with `target not halted`, exposing that resume/halt/read sequencing
+  over ST-LINK's HLA transport isn't behaving predictably enough here to
+  trust further without better tooling.
+
+Rather than force a confident root cause from unreliable signals, this is
+left as a genuinely open, honestly-scoped finding: something is wrong on
+real hardware, probing attempts so far don't agree on what, and resolving
+it needs either a real JTAG session (not ST-LINK's HLA transport) or
+physical instrumentation — not more of the same remote register reads.
 
 ### Secure boot — confirmed working on real hardware
 
