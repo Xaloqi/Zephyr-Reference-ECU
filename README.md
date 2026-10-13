@@ -158,12 +158,18 @@ Three independent jobs (`.github/workflows/ci.yml`):
    that means for every step in it.
 
 **None of these jobs runs the real firmware over real CAN.** That was done
-once, manually, on the bench (see Phase 2 below — a real `TesterPresent`
-round trip over a physically wired bus) — it is not a CI job, there is no
-hardware-in-the-loop runner, and nothing re-verifies it on every push.
-Provoking the door-ajar or window-stall DTC monitors for real — watching
-`src/bcm_state.c`'s own logic fire and clear — has not been done at all
-yet, on the bench or otherwise.
+once, manually, on the bench (see Phase 2 below) — it is not a CI job,
+there is no hardware-in-the-loop runner, and nothing re-verifies it on
+every push.
+
+**The door-ajar monitor has been provoked for real, on the bench, over the
+physical bus** — raw ISO-TP frames (`can-utils`' `isotpsend`/`isotprecv`,
+free, no Pro transport needed), a real AES-128-CMAC SecurityAccess unlock
+computed independently against a live seed, `DoorLockAll` executed for
+real, `BCM_DoorStatus` written open, and DTC `0x041064` confirmed set
+(`59 02 FF 04 10 64 0B` — the exact status bits `bcm_state.c` sets) after
+the debounce window, then confirmed cleared after closing the door and
+re-unlocking. The window-stall monitor has not been exercised this way yet.
 
 **No secure-boot claim.** EDS ships MCUboot swap and a fail-closed
 image-policy gate, but firmware authenticity/anti-rollback
