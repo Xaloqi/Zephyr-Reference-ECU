@@ -14,8 +14,7 @@
  *          src/bcm_storage.c for the persistence boundary behind the
  *          cycle-count DID.
  *
- * TARGET:  native_sim only in this phase. The NUCLEO-H753ZI board overlay
- *          lands with Phase 2 (real hardware) — see README.md.
+ * TARGET:  native_sim and nucleo_h753zi.
  *
  * THREAD MODEL:
  *   main()       — platform init -> UDS init -> launch diag_task -> return 0
@@ -68,13 +67,11 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/can.h>
+#include <zephyr/drivers/flash.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/storage/flash_map.h>
 
 LOG_MODULE_REGISTER(reference_bcm, LOG_LEVEL_INF);
-
-#if !defined(CONFIG_BOARD_NATIVE_SIM)
-#error "Phase 1 of this repo targets native_sim only -- see README.md"
-#endif
 
 /* =============================================================================
  * Configuration
@@ -279,9 +276,42 @@ int main(void)
         }
     }
 
-    /* native_sim only (enforced above): RAM-backed mock NVM, no real flash
-     * partition to resolve. See platform/zephyr/nvm_store_mock.c in EDS. */
+    /*
+     * native_sim: RAM-backed mock NVM (nvm_store_mock.c), no real flash
+     * partition to resolve — nvm_store_init() ignores cfg entirely, NULL
+     * is correct there (see EDS's nvm_store.h: "may be NULL on host").
+     *
+     * nucleo_h753zi: real NVS backend (nvm_store.c) against the diag_nvs
+     * partition reserved in boards/nucleo_h753zi.overlay. FIXED_PARTITION_*
+     * macros take the DTS *node label* (eds_nvs_slot), not the partition's
+     * string "label" property ("diag_nvs") — same distinction EDS's own
+     * basic_ecu/src/main.c documents for the identical pattern.
+     */
+#if defined(CONFIG_BOARD_NATIVE_SIM)
     status = nvm_store_init(NULL);
+#else
+    {
+        const struct device    *nvs_dev = FIXED_PARTITION_DEVICE(eds_nvs_slot);
+        const off_t              nvs_off = FIXED_PARTITION_OFFSET(eds_nvs_slot);
+        const size_t              nvs_sz = FIXED_PARTITION_SIZE(eds_nvs_slot);
+        struct flash_pages_info  page_info;
+        int rc = flash_get_page_info_by_offs(nvs_dev, nvs_off, &page_info);
+
+        if (rc != 0) {
+            LOG_ERR("NVM store: flash_get_page_info_by_offs failed: %d", rc);
+            status = UDS_STATUS_ERR_PLATFORM;
+        } else {
+            const nvm_store_cfg_t nvm_cfg = {
+                .flash_dev    = (const void *)nvs_dev,
+                .flash_offset = (uint32_t)nvs_off,
+                .sector_size  = (uint32_t)page_info.size,
+                .sector_count = (uint8_t)(nvs_sz / page_info.size),
+            };
+
+            status = nvm_store_init(&nvm_cfg);
+        }
+    }
+#endif
     if (status != UDS_STATUS_OK) {
         LOG_ERR("NVM store init failed: 0x%02X — DTC mirror will not "
                 "survive reset this run.", (unsigned)status);

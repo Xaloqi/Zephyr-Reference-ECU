@@ -53,7 +53,7 @@ model the kind of commands a real BCM receives.
 | **DIDs** | 6 (3 standard identity, 2 body-state, 1 persisted counter) |
 | **DTCs** | 2 |
 | **Routines** | 2 |
-| **Transport** | CAN / ISO-TP (loopback on `native_sim`; real CAN in Phase 2) |
+| **Transport** | CAN / ISO-TP — loopback on `native_sim`, real CAN confirmed on `nucleo_h753zi` (Phase 2) |
 | **RTOS** | Zephyr v3.7.0 |
 
 ### DIDs
@@ -89,13 +89,15 @@ model the kind of commands a real BCM receives.
 separate from EDS's own NVM store, which belongs to the diagnostics layer
 (the DTC mirror) and is not this module's concern.
 
-**Phase 1 (this phase, `native_sim`): a RAM-backed stub.** `native_sim` has
-no real flash, so there is nothing to persist across a process restart —
-the module says so in its own boot log line rather than pretending
-otherwise. The API (`bcm_storage_init`, `bcm_storage_load_door_cycle_count`,
-`bcm_storage_save_door_cycle_count`) is the real, permanent boundary; only
-the backing implementation changes when Phase 2 adds real hardware and a
-flash-backed settings partition.
+**Still a RAM-backed stub on real hardware, too.** The plan was for Phase 2
+to back this with a flash-backed settings partition. It can't yet: the
+same NVS/128 KB-sector incompatibility documented under
+[Phase 2](#phase-2--real-hardware) ([`EDS#304`](https://github.com/Xaloqi/EDS/issues/304))
+blocks this module exactly as it blocks EDS's own DTC mirror — there is no
+working flash-backed persistence primitive on this board to build on yet.
+The API (`bcm_storage_init`, `bcm_storage_load_door_cycle_count`,
+`bcm_storage_save_door_cycle_count`) is the real, permanent boundary;
+only the backing implementation changes once that's resolved upstream.
 
 ---
 
@@ -155,11 +157,13 @@ Three independent jobs (`.github/workflows/ci.yml`):
    `campaigns/reference_bcm.yaml`'s own header comment for exactly what
    that means for every step in it.
 
-**None of these jobs runs the real firmware over real CAN.** That needs the
-Phase 2 hardware below, or a Pro transport — this repo's CI has neither, and
-the badge above does not claim otherwise. Provoking the door-ajar or
-window-stall DTC monitors for real — watching `src/bcm_state.c`'s own
-logic fire and clear — is exactly the kind of thing that needs Phase 2.
+**None of these jobs runs the real firmware over real CAN.** That was done
+once, manually, on the bench (see Phase 2 below — a real `TesterPresent`
+round trip over a physically wired bus) — it is not a CI job, there is no
+hardware-in-the-loop runner, and nothing re-verifies it on every push.
+Provoking the door-ajar or window-stall DTC monitors for real — watching
+`src/bcm_state.c`'s own logic fire and clear — has not been done at all
+yet, on the bench or otherwise.
 
 **No secure-boot claim.** EDS ships MCUboot swap and a fail-closed
 image-policy gate, but firmware authenticity/anti-rollback
@@ -168,11 +172,32 @@ This repo makes no secure-boot claim of any kind in this phase.
 
 ---
 
-## Bill of materials (Phase 2 — not needed for anything above)
+## Phase 2 — real hardware
 
-Phase 1 (this repo, today) needs **no board at all.** The BOM below is
-published now so it is never a surprise later, and so Phase 2 is a
-documented setup step, not something a forker debugs.
+```bash
+west build -b nucleo_h753zi . -- -DDIAG_SKIP_CODEGEN=ON
+west flash
+```
+
+Confirmed on real hardware, not simulated: the firmware boots, the UDS
+stack reports `6 DIDs 2 DTCs`, and a real `TesterPresent` request sent over
+the physical CAN bus (`7DF#023E00`) gets a real positive response
+(`7E8#027E00`) — genuine ISO-TP + UDS dispatch on real silicon, not a log
+message.
+
+**One real, known limitation.** DTC-mirror persistence fails to initialize
+on this board: `fs_nvs: Invalid sector size`. Root cause, already filed and
+root-caused upstream as [Xaloqi/EDS#304](https://github.com/Xaloqi/EDS/issues/304):
+Zephyr's NVS subsystem stores its sector size in a 16-bit field (max
+64 KB), but the STM32H7's native flash erase sector is 128 KB — no value
+satisfies both constraints, on this chip or any STM32H7 board. Non-fatal
+(the firmware logs the error and continues, same as EDS's own
+`safeboot_ecu`) — DTCs still work over this boot, they just don't survive
+a reset. Our own `src/bcm_storage.c` cycle-count persistence is blocked on
+the identical root cause and stays a documented RAM stub until EDS
+resolves it.
+
+### Bill of materials
 
 - **NUCLEO-H753ZI** — chosen over the alternative the earlier scoping pass
   considered (FRDM-MCXN947) on two verified facts: 22 EDS example
@@ -183,15 +208,21 @@ documented setup step, not something a forker debugs.
 - **Waveshare SN65HVD230** 3.3 V CAN transceiver board — a ~€4 commodity
   part, sold in pairs. Named explicitly here so it is never a surprise.
 - Wiring: `3.3V`, `GND`, `CAN RX → PD0`, `CAN TX → PD1`, plus the
-  termination jumper.
-- A USB-CAN adapter on the host, for SocketCAN.
+  termination jumper (both ends of the bus need it — see below).
+- A USB-CAN adapter on the host for SocketCAN. Confirmed working: an
+  **MKS CANable V2.0 Pro**, which ships slcan firmware (not native
+  `gs_usb`) — bridge it with `can-utils`' `slcand`:
+  ```bash
+  sudo apt-get install -y can-utils
+  sudo slcand -o -c -s6 /dev/ttyACM<N> slcan0   # -s6 = 500 kbit/s
+  sudo ip link set up slcan0
+  ```
 - **Ethernet requires jumpers JP6 and JP7 ON** if a future phase adds DoIP
   over the onboard RJ45 — PA2/PB13 conflict with the ST Zio/morpho
-  connectors otherwise (Zephyr's own board DTS carries this warning).
+  connectors otherwise (Zephyr's own board DTS carries this warning). Not
+  needed for anything in this phase — leave Ethernet unplugged.
 
-A photograph of the working bring-up lands in this README once Phase 2
-ships. A documented part is an instruction; an undocumented one is
-friction.
+A documented part is an instruction; an undocumented one is friction.
 
 ---
 
