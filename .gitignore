@@ -1,0 +1,7 @@
+build/
+reports/
+*.o
+*.exe
+__pycache__/
+*.pyc
+.west/

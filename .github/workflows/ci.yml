@@ -1,0 +1,157 @@
+# =============================================================================
+# Xaloqi Zephyr-Reference-ECU — .github/workflows/ci.yml
+#
+# Three independent jobs, proving three different things — see README.md
+# "What CI does and does not prove" for why none claims more than this:
+#
+#   unit-tests        — src/bcm_debounce.c's host-level unit tests (plain
+#                        gcc, no Zephyr, no EDS).
+#   zephyr-native      — the firmware actually builds and links for
+#                        native_sim, using the pre-committed generated/
+#                        tree (no commercial licence needed).
+#   virtual-campaign  — the free, Apache-2.0 xaloqi-tester's campaign
+#                        mechanics run clean against this ECU's
+#                        diagnostics_config.yaml, with zero hardware.
+#
+# None exercises real CAN. That needs real hardware (Phase 2) or a
+# commercial transport (Pro) — this repo's CI does not have either, and
+# does not claim to.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    name: "Unit tests (src/bcm_debounce.c, plain gcc)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run host-level unit tests
+        run: bash tests/run_tests.sh
+
+  zephyr-native:
+    name: "Zephyr build — native_sim"
+    runs-on: ubuntu-22.04
+
+    steps:
+      # Checkout into a named subdirectory so west can use it as the
+      # manifest repo while keeping the workspace root free for west
+      # modules (zephyr/, modules/xaloqi-eds/).
+      - uses: actions/checkout@v4
+        with:
+          path: Zephyr-Reference-ECU
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc g++ gcc-multilib g++-multilib cmake ninja-build device-tree-compiler \
+            python3 python3-pip libffi-dev libssl-dev git wget
+
+      - name: Install west
+        run: pip install west
+
+      - name: Initialize west workspace
+        run: west init -l Zephyr-Reference-ECU
+
+      - name: Fetch Zephyr and modules (incl. Xaloqi EDS)
+        run: west update
+
+      - name: Export Zephyr CMake package
+        run: west zephyr-export
+
+      - name: Install Zephyr Python requirements
+        run: pip install -r zephyr/scripts/requirements.txt
+
+      - name: Verify pre-committed generated files are present
+        working-directory: Zephyr-Reference-ECU
+        run: |
+          for f in generated/uds_init.c \
+                   generated/did_handlers.c \
+                   generated/routine_handlers.c \
+                   generated/safety_config.h \
+                   generated/generated_config.h; do
+            test -f "$f" && echo "OK: $f" || (echo "MISSING: $f" && exit 1)
+          done
+
+      - name: Verify the [APP HOOK] delegation survived
+        working-directory: Zephyr-Reference-ECU
+        run: |
+          grep -q "\[APP HOOK\]" generated/routine_handlers.c \
+            && echo "OK: [APP HOOK] markers present" \
+            || (echo "FAIL: generated/routine_handlers.c lost its [APP HOOK] delegation" && exit 1)
+
+      # ZEPHYR_TOOLCHAIN_VARIANT=host uses the system gcc for native_sim,
+      # bypassing the Zephyr SDK cross-toolchain entirely.
+      - name: West build — native_sim
+        env:
+          ZEPHYR_TOOLCHAIN_VARIANT: host
+        run: |
+          west build \
+            --pristine \
+            -b native_sim \
+            Zephyr-Reference-ECU \
+            -- \
+            -DDIAG_SKIP_CODEGEN=ON
+
+      - name: Verify binary exists
+        run: |
+          test -f build/zephyr/zephyr.exe \
+            && echo "PASS: zephyr.exe produced" \
+            || (echo "FAIL: zephyr.exe not found" && exit 1)
+
+      - name: Boot smoke test — 3 s, confirm no crash and UDS stack ready
+        run: |
+          timeout 3 ./build/zephyr/zephyr.exe > boot.log 2>&1 || true
+          cat boot.log
+          grep -q "UDS stack ready" boot.log \
+            && echo "PASS: UDS stack reported ready" \
+            || (echo "FAIL: ECU never logged UDS stack ready" && exit 1)
+
+      - name: Upload native_sim binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: native_sim-binary
+          path: build/zephyr/zephyr.exe
+
+  virtual-campaign:
+    name: "TestLab virtual campaign (free tier, zero hardware)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install TestLab Core (free, Apache-2.0)
+        run: pip install xaloqi-tester
+
+      - name: Run the reference_bcm campaign against the virtual ECU
+        run: |
+          mkdir -p reports
+          testlab-run \
+            --config   diagnostics_config.yaml \
+            --campaign campaigns/reference_bcm.yaml \
+            --job      reference_bcm_validation \
+            --virtual \
+            --json     reports/virtual.json
+
+      - name: Analyze results
+        if: always()
+        run: |
+          if [ -f reports/virtual.json ]; then
+            testlab analyze --results reports/virtual.json
+          fi
+
+      - name: Upload campaign results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtual-campaign-results
+          path: reports/virtual.json

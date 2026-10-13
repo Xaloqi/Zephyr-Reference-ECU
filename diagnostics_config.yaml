@@ -1,0 +1,127 @@
+# =============================================================================
+# Xaloqi Zephyr-Reference-ECU
+# diagnostics_config.yaml
+#
+# Single source of truth for this ECU's diagnostic surface. Two consumers:
+#
+#   1. Xaloqi EDS's tools/codegen.py reads this to generate generated/*.c|h
+#      (requires the commercial Jinja2 templates — see README.md "Tiers").
+#   2. xaloqi-tester (free, Apache-2.0) reads this SAME file directly as a
+#      virtual-ECU description for `testlab-run --virtual` — no conversion
+#      step, no second config to keep in sync.
+#
+# This ECU is a Body Control Module (BCM) reference: door and window state,
+# one persisted counter, two fault monitors, two RoutineControl actuations.
+# =============================================================================
+
+schema_version: 1
+metadata:
+  ecu_name: "ReferenceBCM"
+  version:  "0.1.0"
+  description: "Xaloqi Zephyr-Reference-ECU — a forkable Body Control Module reference application"
+
+can:
+  rx_can_id: "0x7DF"  # ISO 15765-4 functional addressing (request)
+  tx_can_id: "0x7E8"  # ISO 15765-4 physical response (ECU address 0)
+
+timing:
+  p2_server_max_ms:       25
+  p2_star_server_max_ms:  5000
+  s3_server_timeout_ms:   5000
+
+dids:
+  # ── Standard identity DIDs ────────────────────────────────────────────────
+  - id:   "0xF190"
+    name: "VehicleIdentificationNumber"
+    access:
+      - read
+    min_session: "default"
+    read_security_level:  0
+    write_security_level: 1
+    data_length: 17
+
+  - id:   "0xF18C"
+    name: "ECUSerialNumber"
+    access:
+      - read
+    min_session: "default"
+    read_security_level:  0
+    write_security_level: 1
+    data_length: 4
+
+  - id:   "0xF189"
+    name: "ECUSoftwareVersionNumber"
+    access:
+      - read
+    min_session: "default"
+    read_security_level:  0
+    write_security_level: 1
+    data_length: 4
+
+  # ── Body-state DIDs ───────────────────────────────────────────────────────
+  # Writable: native_sim has no real door/window sensors. A test campaign
+  # injects both signals by writing them (SecurityAccess level 1 required),
+  # the same pattern EDS's own vehicle_state_ecu example uses for its two
+  # vehicle-state inputs. Remove 'write' from access, or compile the
+  # injection path out, before shipping this onto a real body-control bus.
+  - id:   "0x0410"
+    name: "BCM_DoorStatus"
+    access:
+      - read
+      - write
+    min_session: "extended"
+    read_security_level:  0
+    write_security_level: 1
+    data_length: 1   # bit0=FL bit1=FR bit2=RL bit3=RR, 1=open
+
+  - id:   "0x0411"
+    name: "BCM_WindowPosition_pct"
+    access:
+      - read
+      - write
+    min_session: "extended"
+    read_security_level:  0
+    write_security_level: 1
+    data_length: 1   # 0=fully closed, 100=fully open
+
+  # ── Persisted DID ─────────────────────────────────────────────────────────
+  # Backed by the app's own storage module (Zephyr settings subsystem),
+  # not EDS's NVM store — see storage/README.md. Survives a reset on real
+  # hardware; resets to 0 on native_sim (settings backend there is RAM-only).
+  # 'write' exists so the app can push the value loaded from settings into
+  # the generated accessor's backing store at boot (there is no separate
+  # "internal setter" API — see src/bcm_storage.c); the same gating as the
+  # body-state DIDs applies, so a tester can also seed it for test setup.
+  - id:   "0x0412"
+    name: "BCM_DoorCycleCount"
+    access:
+      - read
+      - write
+    min_session: "extended"
+    read_security_level:  0
+    write_security_level: 1
+    data_length: 4   # uint32, big-endian
+
+dtcs:
+  - code:        "0x041064"
+    description: "Door ajar timeout — a door reported open while the body controller is in the locked state, continuously, past the monitor's grace period"
+    severity:    "check_at_next_halt"
+
+  - code:        "0x041165"
+    description: "Window actuation stall — a commanded window position was not reached within the actuator's expected travel time"
+    severity:    "maintenance_only"
+
+routines:
+  - id:   "0x0420"
+    name: "DoorLockAll"
+    description: "Lock all four doors and arm the door-ajar monitor"
+    min_session:    "extended"
+    security_level: 1
+    support:        ["start", "results"]
+
+  - id:   "0x0421"
+    name: "WindowCalibrate"
+    description: "Asynchronous: drive the window fully closed then fully open to learn its end stops; poll for completion"
+    min_session:    "extended"
+    security_level: 1
+    support:        ["start", "results"]

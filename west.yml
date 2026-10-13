@@ -1,0 +1,24 @@
+manifest:
+  version: "0.13"
+
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: xaloqi
+      url-base: https://github.com/Xaloqi
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v3.7.0
+      path: zephyr
+      import:
+        file: west.yml
+
+    - name: EDS
+      remote: xaloqi
+      revision: main
+      path: modules/xaloqi-eds
+
+  self:
+    path: Zephyr-Reference-ECU
