@@ -1,2 +1,214 @@
-# Zephyr-Reference-ECU
-A forkable Body Control Module reference application on Zephyr RTOS, with Xaloqi EDS wired in as its diagnostics layer
+# Xaloqi Zephyr-Reference-ECU
+
+**A forkable Body Control Module reference application on Zephyr RTOS, with
+[Xaloqi EDS](https://github.com/Xaloqi/EDS) wired in as its diagnostics
+layer.**
+
+Clone it, build it, run it — one command, no board, no licence:
+
+```bash
+west init -l .
+west update
+west build -b native_sim .
+./build/zephyr/zephyr.exe
+```
+
+That's a complete, running ECU: door-lock state, a window-position monitor,
+two fault conditions, two RoutineControl actuations, and ISO 14229 (UDS)
+diagnostics over CAN/ISO-TP — all of it on your laptop, no hardware
+required.
+
+---
+
+## Now make it yours
+
+The point of this repo is not that it works out of the box. **A reference
+ECU whose diagnostics already work perfectly is the least useful version of
+this idea** — you clone it, you're impressed, you leave.
+
+So: rename the ECU in `diagnostics_config.yaml`, change a DID, add your own
+signal, run `tools/codegen.py` (from [Xaloqi EDS](https://github.com/Xaloqi/EDS))
+to regenerate `generated/`, and rebuild. That path is the real point of this
+repo — it leads straight to the commercial boundary (see
+[Tiers](#tiers--what-is-free-and-what-is-not) below), by design, with no
+sales pitch in the way.
+
+**Diagnostics is a component here, not the subject.** `src/bcm_state.c` and
+`src/bcm_storage.c` are the application — door-lock logic, a window
+monitor, a persisted cycle counter. EDS is the part that is supposed to
+just work so you don't have to think about it, until the moment you change
+a DID.
+
+---
+
+## What this is
+
+A Body Control Module: it tracks four doors (open/closed), a window
+position, and a persisted door-actuation cycle count, and exposes all of it
+over UDS. Two DTCs model realistic faults; two RoutineControl actuations
+model the kind of commands a real BCM receives.
+
+| | |
+|---|---|
+| **DIDs** | 6 (3 standard identity, 2 body-state, 1 persisted counter) |
+| **DTCs** | 2 |
+| **Routines** | 2 |
+| **Transport** | CAN / ISO-TP (loopback on `native_sim`; real CAN in Phase 2) |
+| **RTOS** | Zephyr v3.7.0 |
+
+### DIDs
+
+| ID | Name | Bytes | Access | Notes |
+|---|---|---|---|---|
+| `0xF190` | VehicleIdentificationNumber | 17 | read | Standard |
+| `0xF18C` | ECUSerialNumber | 4 | read | Standard |
+| `0xF189` | ECUSoftwareVersionNumber | 4 | read | Standard |
+| `0x0410` | BCM_DoorStatus | 1 | read, write | bit0-3 = FL/FR/RL/RR, 1=open. Writable because `native_sim` has no real door sensors — a test campaign *injects* this signal, same pattern as EDS's own [`vehicle_state_ecu`](https://github.com/Xaloqi/EDS/tree/main/examples/vehicle_state_ecu) example |
+| `0x0411` | BCM_WindowPosition_pct | 1 | read, write | 0-100%. Same injection pattern |
+| `0x0412` | BCM_DoorCycleCount | 4 | read, write | Backed by `src/bcm_storage.c` — see [Storage](#storage) |
+
+### DTCs
+
+| Code | Trigger |
+|---|---|
+| `0x041064` | Door ajar timeout — a door reported open while `DoorLockAll` has locked the body controller, continuously, past a ~500 ms debounce |
+| `0x041165` | Window actuation stall — `BCM_WindowPosition_pct` commanded outside its nominal 0-100 range, past a ~300 ms debounce (stands in for a real motor's current-sense obstruction detection — see `src/bcm_state.c`'s header comment) |
+
+### Routines
+
+| RID | Name | Behaviour |
+|---|---|---|
+| `0x0420` | DoorLockAll | `start`: locks all doors, arms the door-ajar monitor, increments the persisted cycle count. `results`: `[lock_state, door_status]` |
+| `0x0421` | WindowCalibrate | Asynchronous: `start` begins a 4-tick learn-the-end-stops walk; `results` polls `[status, learned_min_pct, learned_max_pct]` |
+
+---
+
+## Storage
+
+`src/bcm_storage.c` is the persistence boundary for the door-cycle counter —
+separate from EDS's own NVM store, which belongs to the diagnostics layer
+(the DTC mirror) and is not this module's concern.
+
+**Phase 1 (this phase, `native_sim`): a RAM-backed stub.** `native_sim` has
+no real flash, so there is nothing to persist across a process restart —
+the module says so in its own boot log line rather than pretending
+otherwise. The API (`bcm_storage_init`, `bcm_storage_load_door_cycle_count`,
+`bcm_storage_save_door_cycle_count`) is the real, permanent boundary; only
+the backing implementation changes when Phase 2 adds real hardware and a
+flash-backed settings partition.
+
+---
+
+## Tiers — what is free and what is not
+
+This repo's own code (`src/`, `diagnostics_config.yaml`, `generated/`,
+build files, campaigns) is **Apache-2.0** — see `LICENSE`. What it depends
+on has a boundary — see `COMMERCIAL_NOTICE.md` for the full table, summarized
+here:
+
+| | Free | Needs a licence |
+|---|---|---|
+| Clone, build, run on `native_sim` | ✅ (`generated/` is pre-committed) | |
+| Run the virtual TestLab campaign | ✅ (`xaloqi-tester`, Apache-2.0) | |
+| Edit `diagnostics_config.yaml` and **regenerate** `generated/` | | EDS commercial licence (Developer/Professional) |
+| Generate the pytest/CAPL test suite alongside the C | | EDS commercial licence — no free path for this half |
+| Real CAN/DoIP transport for the TestLab campaign | | `xaloqi-tester-pro` |
+| Ship closed-source firmware built on this | | EDS commercial licence (GPL-2.0 otherwise requires releasing your firmware's source) |
+
+**Pre-committed generated C.** `generated/*.c|h` is committed to this repo
+so that a forker with no EDS licence can still build and run everything
+above the line. This is the exact mechanism EDS's own public examples use
+(see EDS's `COMMERCIAL_NOTICE.md`: *"Examples ship their generated C"*) —
+copied here, not reinvented.
+
+**The one hand-edited `generated/` file.** `generated/routine_handlers.c`
+normally regenerates as empty TODO stubs. This repo's copy delegates its
+four RoutineControl bodies to `src/bcm_state.c` instead — the `[APP HOOK]`
+markers in that file are exactly what to reapply if you ever regenerate it
+from `diagnostics_config.yaml` (a configure-time check in `CMakeLists.txt`
+fails the build loudly if a marker goes missing). Same precedent as EDS's
+own [`vehicle_state_ecu`](https://github.com/Xaloqi/EDS/tree/main/examples/vehicle_state_ecu)
+example, which documents the identical one-file exception.
+
+---
+
+## What CI does and does not prove
+
+Three independent jobs (`.github/workflows/ci.yml`):
+
+0. **`unit-tests`** — runs `tests/test_bcm_debounce.c` (plain gcc, no
+   Zephyr, no EDS). This is the one module in `src/` with no Zephyr/EDS
+   dependency at all; the rest of `src/` only compiles inside the full
+   west/Zephyr build, so it's proven by the job below instead, not by a
+   host unit test.
+1. **`zephyr-native`** — builds this ECU for `native_sim` and boots it for
+   3 seconds, confirming the UDS stack initializes. This proves the
+   firmware **builds and links against real EDS**, nothing more. It does
+   not exchange a single UDS frame.
+2. **`virtual-campaign`** — runs `campaigns/reference_bcm.yaml` with the
+   free `xaloqi-tester --virtual`. This proves the campaign mechanics and
+   the wire-level DID/routine/DTC surface work, **against a small built-in
+   simulator, not this ECU's real firmware.** Verified directly, not
+   assumed: the free tier's `--virtual` ECU starts with four hardcoded
+   standard DIDs and no others, and answers RoutineControl for any RID
+   without running this ECU's actual logic — see
+   `campaigns/reference_bcm.yaml`'s own header comment for exactly what
+   that means for every step in it.
+
+**None of these jobs runs the real firmware over real CAN.** That needs the
+Phase 2 hardware below, or a Pro transport — this repo's CI has neither, and
+the badge above does not claim otherwise. Provoking the door-ajar or
+window-stall DTC monitors for real — watching `src/bcm_state.c`'s own
+logic fire and clear — is exactly the kind of thing that needs Phase 2.
+
+**No secure-boot claim.** EDS ships MCUboot swap and a fail-closed
+image-policy gate, but firmware authenticity/anti-rollback
+([`EDS#319`](https://github.com/Xaloqi/EDS/issues/319)) is open upstream.
+This repo makes no secure-boot claim of any kind in this phase.
+
+---
+
+## Bill of materials (Phase 2 — not needed for anything above)
+
+Phase 1 (this repo, today) needs **no board at all.** The BOM below is
+published now so it is never a surprise later, and so Phase 2 is a
+documented setup step, not something a forker debugs.
+
+- **NUCLEO-H753ZI** — chosen over the alternative the earlier scoping pass
+  considered (FRDM-MCXN947) on two verified facts: 22 EDS example
+  references across the H7 Nucleo family (vs. 2), and a working hardware
+  bring-up through to host SocketCAN. The FRDM's "onboard CAN PHY" claim
+  could not be verified — NXP's own board documentation lists a **SoC**
+  feature, not a board one.
+- **Waveshare SN65HVD230** 3.3 V CAN transceiver board — a ~€4 commodity
+  part, sold in pairs. Named explicitly here so it is never a surprise.
+- Wiring: `3.3V`, `GND`, `CAN RX → PD0`, `CAN TX → PD1`, plus the
+  termination jumper.
+- A USB-CAN adapter on the host, for SocketCAN.
+- **Ethernet requires jumpers JP6 and JP7 ON** if a future phase adds DoIP
+  over the onboard RJ45 — PA2/PB13 conflict with the ST Zio/morpho
+  connectors otherwise (Zephyr's own board DTS carries this warning).
+
+A photograph of the working bring-up lands in this README once Phase 2
+ships. A documented part is an instruction; an undocumented one is
+friction.
+
+---
+
+## Relationship to Eclipse OpenSOVD / AGL SoDeV
+
+**None, yet, in this phase.** A later phase may demonstrate this ECU
+answering the Eclipse OpenSOVD Classic Diagnostic Adapter over real CAN —
+already proven possible with EDS directly — as an optional, demonstrated
+integration, never a dependency. This repo makes **no claim of AGL, SoDeV,
+or Eclipse endorsement or affiliation** of any kind; those are independent
+projects and this is an independent, unaffiliated reference application
+built against EDS.
+
+---
+
+## Licence
+
+This repository's own code: **Apache-2.0** (`LICENSE`). What it depends on
+has its own, different licence — see `COMMERCIAL_NOTICE.md` before you
+assume anything here is free to regenerate or re-license.

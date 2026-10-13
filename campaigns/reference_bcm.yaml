@@ -1,0 +1,120 @@
+# =============================================================================
+# Xaloqi Zephyr-Reference-ECU
+# campaigns/reference_bcm.yaml
+#
+# Run with the free, Apache-2.0 xaloqi-tester against its in-process virtual
+# ECU — no build, no binary, no hardware, no licence:
+#
+#   pip install xaloqi-tester
+#   testlab-run --config   diagnostics_config.yaml \
+#               --campaign campaigns/reference_bcm.yaml \
+#               --job      reference_bcm_validation \
+#               --virtual \
+#               --json     reports/virtual.json
+#
+# This is the SAME diagnostics_config.yaml that EDS's codegen.py consumes to
+# generate generated/*.c|h — one file, two consumers, see that file's header.
+#
+# WHAT THIS PROVES, AND WHAT IT DOES NOT (verified empirically, not assumed —
+# see README.md "What CI does and does not prove"):
+#
+#   The free tier's --virtual ECU (xaloqi/sim.py) is a small built-in
+#   simulator, not a generic interpreter of diagnostics_config.yaml. It
+#   starts with four hardcoded standard DIDs and an empty DTC table; any
+#   other DID — including every one this ECU defines — only exists in it
+#   once written. RoutineControl (SID 0x31) accepts any RID and always
+#   replies positively; it does not run this ECU's actual routine logic.
+#   So every body-state DID below is WRITTEN before it is read (the same
+#   "tester-injected signal" pattern EDS's own vehicle_state_ecu example
+#   documents), and the two RoutineControl steps prove the wire protocol
+#   and campaign mechanics, not src/bcm_state.c's door-lock/window-stall
+#   behaviour or generated/routine_handlers.c's [APP HOOK] delegation.
+#   Provoking the door-ajar or window-stall DTC monitors for real needs the
+#   real firmware over a real transport (Pro) — Phase 2/3 territory.
+# =============================================================================
+
+jobs:
+  reference_bcm_validation:
+    description: >
+      Identity read, a write/read round trip on both body-state DIDs and
+      the persisted cycle-count DID, both RoutineControl actuations'
+      start/results sub-functions, and the DTC read/clear/re-read round
+      trip — against the virtual ECU.
+    timeout_ms: 15000
+    on_failure: abort
+
+    steps:
+      - action: tester_present
+        suppress: false
+
+      - action: session
+        value: extended
+
+      - action: security_access
+        level: 1
+
+      - action: read_did
+        did: "0xF190"
+        save_as: vin
+
+      # ── Body-state DIDs: write, then read back (see header comment) ────
+      - action: write_did
+        did: "0x0410"
+        data: "0x00"              # all four doors closed
+
+      - action: read_did
+        did: "0x0410"
+        save_as: door_status
+
+      - action: write_did
+        did: "0x0411"
+        data: "0x32"              # 50% open
+
+      - action: read_did
+        did: "0x0411"
+        save_as: window_pct
+
+      - action: write_did
+        did: "0x0412"
+        data: "0x00000000"
+
+      - action: read_did
+        did: "0x0412"
+        save_as: door_cycle_count
+
+      # ── RoutineControl — wire protocol + campaign mechanics only ────────
+      - action: routine
+        id: "0x0420"
+        sub_fn: start
+        save_as: doorlock_start_result
+
+      - action: routine
+        id: "0x0420"
+        sub_fn: results
+        save_as: doorlock_results
+
+      - action: routine
+        id: "0x0421"
+        sub_fn: start
+        save_as: windowcal_start_result
+
+      - action: routine
+        id: "0x0421"
+        sub_fn: results
+        save_as: windowcal_results
+
+      # ── DTC round trip ──────────────────────────────────────────────────
+      - action: read_dtc
+        save_as: dtcs_before
+
+      - action: clear_dtc
+
+      - action: read_dtc
+        save_as: dtcs_after
+
+      - action: assert
+        variable: dtcs_after
+        not_nrc: true
+
+      - action: session
+        value: default
