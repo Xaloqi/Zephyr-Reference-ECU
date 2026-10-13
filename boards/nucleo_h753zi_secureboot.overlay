@@ -1,0 +1,113 @@
+/*
+ * =============================================================================
+ * Xaloqi Zephyr-Reference-ECU
+ * boards/nucleo_h753zi_secureboot.overlay
+ *
+ * Self-contained overlay for the secure-boot build — everything
+ * boards/nucleo_h753zi.overlay has (FDCAN1, IWDG, RNG, USART3), plus the
+ * MCUboot-aware flash partition table, adapted verbatim from Xaloqi EDS's
+ * own confirmed examples/safeboot_ecu/boards/nucleo_h753zi/
+ * nucleo_h753zi.overlay. -DDTC_OVERLAY_FILE replaces Zephyr's default
+ * overlay list rather than adding to it, so this file has to be complete
+ * on its own rather than layered on top of the CAN-only overlay.
+ *
+ * Scoped per the proposal's ⬥7 / README.md "Phase 4": wires up exactly
+ * what EDS ships today (MCUboot swap, image-policy gate, fail-closed
+ * production guard). Firmware authenticity / anti-rollback
+ * (EDS#319) is open upstream and explicitly excluded — see README.md.
+ * =============================================================================
+ */
+
+#include <zephyr/dt-bindings/pinctrl/stm32-pinctrl.h>
+
+&pinctrl {
+	fdcan1_rx_pd0: fdcan1_rx_pd0 {
+		pinmux = <STM32_PINMUX('D', 0, AF9)>;
+	};
+	fdcan1_tx_pd1: fdcan1_tx_pd1 {
+		pinmux = <STM32_PINMUX('D', 1, AF9)>;
+		slew-rate = "very-high-speed";
+	};
+};
+
+&fdcan1 {
+	status = "okay";
+	pinctrl-0 = <&fdcan1_rx_pd0 &fdcan1_tx_pd1>;
+	pinctrl-names = "default";
+	bitrate      = <500000>;
+	sample-point = <875>;
+};
+
+/ {
+	aliases {
+		can0 = &fdcan1;
+		watchdog0 = &iwdg;
+	};
+};
+
+&iwdg {
+	status = "okay";
+};
+
+&rng {
+	status = "okay";
+};
+
+/ {
+	chosen {
+		zephyr,entropy = &rng;
+	};
+};
+
+&usart3 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&usart3_tx_pd8 &usart3_rx_pd9>;
+	pinctrl-names = "default";
+};
+
+/* ── Flash partition table — MCUboot + app slots + NVS ─────────────────────
+ *
+ * STM32H753ZI: 2 MB flash, base 0x08000000, 128 KB sectors (dual-bank).
+ *
+ *   Offset     Size    Label        Purpose
+ *   ─────────  ──────  ───────────  ─────────────────────────────────────
+ *   0x000000   256 KB  mcuboot      MCUboot itself (built separately)
+ *   0x040000   768 KB  image-0      Primary application slot
+ *   0x100000   768 KB  image-1      Secondary / OTA staging slot
+ *   0x1C0000   256 KB  diag_nvs     EDS's NVS store (2x128KB, WL minimum)
+ *
+ * image-0 and image-1 MUST stay equal size (MCUboot swap requirement);
+ * every boundary lands on a 128 KB sector edge (a partial-sector erase
+ * would corrupt its neighbour). See EDS's safeboot_ecu/README.md "Flash
+ * layout" for the full reasoning — reused verbatim here, not re-derived.
+ * ─────────────────────────────────────────────────────────────────────── */
+&flash0 {
+	/delete-node/ partitions;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 0x00040000>;
+		};
+
+		slot0_partition: eds_app_slot: partition@40000 {
+			label = "image-0";
+			reg = <0x00040000 0x000C0000>;
+		};
+
+		eds_ota_slot: image_1: slot1_partition: partition@100000 {
+			label = "image-1";
+			reg = <0x00100000 0x000C0000>;
+		};
+
+		eds_nvs_slot: partition@1c0000 {
+			label = "diag_nvs";
+			reg = <0x001C0000 0x00040000>;
+		};
+	};
+};

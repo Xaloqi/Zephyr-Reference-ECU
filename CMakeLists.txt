@@ -88,6 +88,37 @@ option(DIAG_SKIP_CODEGEN
     OFF
 )
 
+# ---------------------------------------------------------------------------
+# Option: build the DoIP-only variant (Phase 4) instead of CAN
+#
+# Selects src/main_doip.c instead of src/main.c, and DoIP transport sources
+# instead of ISO-TP/CAN — never both in the same image. See src/main_doip.c's
+# own header comment for why this repo does not attempt to run CAN and DoIP
+# concurrently (EDS ships no proven architecture for it).
+# ---------------------------------------------------------------------------
+option(DIAG_DOIP_ONLY_BUILD
+    "Build the DoIP transport variant (src/main_doip.c) instead of CAN (src/main.c)"
+    OFF
+)
+
+# ---------------------------------------------------------------------------
+# Option: secure boot (Phase 4) — MCUboot image-policy gate on the CAN build
+#
+# Adds EDS's flash-ops + MCUboot image-policy sources and the boot-confirm /
+# image-policy-registration calls in src/main.c (both guarded by the
+# DIAG_SECURE_BOOT_BUILD compile definition this sets). Requires building
+# and flashing MCUboot itself separately, and the MCUboot-aware partition
+# table in boards/nucleo_h753zi_secureboot.overlay — see README.md "Phase 4".
+#
+# Scoped to exactly what EDS ships today: MCUboot swap, image-policy gate,
+# fail-closed production guard. Firmware authenticity / anti-rollback
+# (EDS#319) is open upstream and explicitly excluded.
+# ---------------------------------------------------------------------------
+option(DIAG_SECURE_BOOT_BUILD
+    "Add MCUboot image-policy support (requires MCUboot built and flashed separately)"
+    OFF
+)
+
 if(NOT DIAG_SKIP_CODEGEN AND NOT EXISTS "${DIAG_ROOT}/tools/templates")
     message(STATUS
         "[REF-ECU] Commercial tools/templates/ not present (expected — this "
@@ -175,6 +206,9 @@ target_include_directories(app PRIVATE
     ${DIAG_GENERATED_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+if(DIAG_DOIP_ONLY_BUILD)
+    target_include_directories(app PRIVATE ${DIAG_ROOT}/transport/doip)
+endif()
 
 # ---------------------------------------------------------------------------
 # Source files
@@ -184,7 +218,6 @@ include(${DIAG_ROOT}/cmake/eds_service_sources.cmake)
 target_sources(app PRIVATE
 
     # ── This repo's own application layer (Apache-2.0) ────────────────────
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/bcm_state.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/bcm_storage.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/bcm_debounce.c
@@ -205,22 +238,14 @@ target_sources(app PRIVATE
     ${DIAG_ROOT}/platform/uds_flash_ops.c
     ${DIAG_ROOT}/platform/uds_image_policy.c
 
-    # ── EDS ISO-TP and CAN transport ────────────────────────────────────
-    ${DIAG_ROOT}/transport/isotp.c
-    ${DIAG_ROOT}/transport/can_transport.c
-    ${DIAG_ROOT}/platform/zephyr/zephyr_can.c
-
     # ── EDS configuration databases ─────────────────────────────────────
     ${DIAG_ROOT}/config/did_database.c
     ${DIAG_ROOT}/config/dtc_database.c
     ${DIAG_ROOT}/config/routine_database.c
     ${DIAG_ROOT}/config/dtc_mirror.c
 
-    # ── EDS Zephyr platform abstraction ─────────────────────────────────
-    ${DIAG_ROOT}/platform/zephyr/zephyr_port.c
+    # ── EDS Zephyr platform abstraction (transport-independent) ──────────
     ${DIAG_ROOT}/platform/zephyr/zephyr_mutex.c
-    ${DIAG_ROOT}/platform/zephyr/zephyr_timer.c
-    ${DIAG_ROOT}/platform/zephyr/zephyr_wdt.c
     ${DIAG_ROOT}/platform/zephyr/zephyr_platform_api.c
 
     # ── Generated sources ────────────────────────────────────────────────
@@ -229,6 +254,44 @@ target_sources(app PRIVATE
     ${DIAG_GENERATED_DIR}/did_safety_wrappers.c
     ${DIAG_GENERATED_DIR}/routine_handlers.c
 )
+
+# ---------------------------------------------------------------------------
+# Transport-specific entry point and sources — CAN (default) or DoIP
+# (DIAG_DOIP_ONLY_BUILD), never both. See src/main_doip.c's header comment
+# for why this repo does not attempt both transports in one image.
+# ---------------------------------------------------------------------------
+if(DIAG_DOIP_ONLY_BUILD)
+    target_sources(app PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/main_doip.c
+        ${DIAG_ROOT}/transport/doip/doip_server.c
+        ${DIAG_ROOT}/transport/doip/zephyr_lwip.c
+        ${DIAG_ROOT}/platform/zephyr/platform_doip.c
+    )
+    target_compile_definitions(app PRIVATE EDS_DOIP_ONLY_BUILD=1)
+else()
+    target_sources(app PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/main.c
+        ${DIAG_ROOT}/transport/isotp.c
+        ${DIAG_ROOT}/transport/can_transport.c
+        ${DIAG_ROOT}/platform/zephyr/zephyr_can.c
+        ${DIAG_ROOT}/platform/zephyr/zephyr_port.c
+        ${DIAG_ROOT}/platform/zephyr/zephyr_timer.c
+        ${DIAG_ROOT}/platform/zephyr/zephyr_wdt.c
+    )
+    if(DIAG_SECURE_BOOT_BUILD)
+        target_sources(app PRIVATE
+            # Called from generated/uds_init.c (zephyr_flash_ops_init())
+            ${DIAG_ROOT}/platform/zephyr/zephyr_flash_ops.c
+            # Called from src/main.c (zephyr_mcuboot_image_policy_init())
+            ${DIAG_ROOT}/platform/zephyr/zephyr_mcuboot_image_policy.c
+            # Streaming SHA-256 + MCUboot header/TLV parser — used by the
+            # image-policy digest check above
+            ${DIAG_ROOT}/platform/uds_sha256.c
+            ${DIAG_ROOT}/platform/uds_mcuboot_image.c
+        )
+        target_compile_definitions(app PRIVATE DIAG_SECURE_BOOT_BUILD=1)
+    endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # NVM store: platform-conditional source selection (same pattern as EDS's
