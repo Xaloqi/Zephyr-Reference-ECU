@@ -1,0 +1,117 @@
+/*
+ * =============================================================================
+ * Xaloqi Zephyr-Reference-ECU
+ * boards/nucleo_h753zi.overlay
+ *
+ * Device Tree overlay for the NUCLEO-H753ZI board — Phase 2 hardware target.
+ * FDCAN1 pinmux, bitrate and sample point are reused verbatim from Xaloqi
+ * EDS's own confirmed reference (boards/nucleo_h753zi/nucleo_h753zi.overlay
+ * in the Xaloqi/EDS repo) — not re-derived here.
+ *
+ * HARDWARE SETUP (see README.md "Bill of materials"):
+ *   NUCLEO-H753ZI → Waveshare SN65HVD230 (3.3V CAN transceiver)
+ *   PD0 (FDCAN1_RX) → transceiver RXD
+ *   PD1 (FDCAN1_TX) → transceiver TXD
+ *   3.3V / GND      → transceiver VCC / GND
+ *   CANH / CANL     → the bus
+ *
+ * NOT MCUboot. This reference ships no secure-boot or DFU capability in
+ * this phase (EDS#319 is open upstream, excluded per the proposal's ⬥7) —
+ * the firmware runs directly from flash offset 0, no bootloader slots.
+ * The flash partition table below exists only to reserve NVS space for
+ * EDS's own DTC-mirror persistence; it carries none of EDS's own
+ * boards/nucleo_h753zi/nucleo_h753zi.overlay MCUboot image-0/image-1
+ * complexity because that complexity exists for DFU, which this repo
+ * does not implement.
+ * =============================================================================
+ */
+
+#include <zephyr/dt-bindings/pinctrl/stm32-pinctrl.h>
+
+/* ── FDCAN1 pin control — PD0/PD1, verbatim from EDS's own reference ──────── */
+&pinctrl {
+	fdcan1_rx_pd0: fdcan1_rx_pd0 {
+		pinmux = <STM32_PINMUX('D', 0, AF9)>;
+	};
+	fdcan1_tx_pd1: fdcan1_tx_pd1 {
+		pinmux = <STM32_PINMUX('D', 1, AF9)>;
+		slew-rate = "very-high-speed";
+	};
+};
+
+/* ── FDCAN1 node — classic CAN 2.0B at 500 kbit/s, 87.5% sample point ─────── */
+&fdcan1 {
+	status = "okay";
+	pinctrl-0 = <&fdcan1_rx_pd0 &fdcan1_tx_pd1>;
+	pinctrl-names = "default";
+	bitrate      = <500000>;
+	sample-point = <875>;
+};
+
+/* ── Alias: can0 → fdcan1 (src/main.c uses DT_ALIAS(can0)) ────────────────── */
+/ {
+	aliases {
+		can0 = &fdcan1;
+		watchdog0 = &iwdg;
+	};
+};
+
+/* ── Independent Watchdog ──────────────────────────────────────────────────── */
+&iwdg {
+	status = "okay";
+};
+
+/* ── Hardware RNG — seeds the UDS SecurityAccess AES-CMAC challenge ───────── */
+&rng {
+	status = "okay";
+};
+
+/ {
+	chosen {
+		zephyr,entropy = &rng;
+	};
+};
+
+/* ── UART3 for logging (ST-LINK virtual COM port) ─────────────────────────── */
+&usart3 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&usart3_tx_pd8 &usart3_rx_pd9>;
+	pinctrl-names = "default";
+};
+
+/* ── Flash partition table — app image + a dedicated NVS partition ─────────
+ *
+ * STM32H753ZI: 2 MB flash, base 0x08000000, 128 KB sectors (dual-bank).
+ * No MCUboot slots — this firmware is the only thing in flash.
+ *
+ *   Offset     Size     Label      Purpose
+ *   ─────────  ───────  ─────────  ──────────────────────────────────
+ *   0x000000   1.75 MB  app        This firmware (zephyr,code-partition)
+ *   0x1C0000   256 KB   diag_nvs   EDS's NVS store (2x128KB, WL minimum)
+ * ─────────────────────────────────────────────────────────────────────── */
+&flash0 {
+	/delete-node/ partitions;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		storage_partition: partition@0 {
+			label = "app";
+			reg = <0x00000000 0x001C0000>;
+		};
+
+		eds_nvs_slot: partition@1c0000 {
+			label = "diag_nvs";
+			reg = <0x001C0000 0x00040000>;
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,code-partition = &storage_partition;
+	};
+};

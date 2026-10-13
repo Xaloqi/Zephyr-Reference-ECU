@@ -222,7 +222,6 @@ target_sources(app PRIVATE
     ${DIAG_ROOT}/platform/zephyr/zephyr_timer.c
     ${DIAG_ROOT}/platform/zephyr/zephyr_wdt.c
     ${DIAG_ROOT}/platform/zephyr/zephyr_platform_api.c
-    ${DIAG_ROOT}/platform/zephyr/nvm_store_mock.c   # Phase 1: native_sim only
 
     # ── Generated sources ────────────────────────────────────────────────
     ${DIAG_GENERATED_DIR}/did_handlers.c
@@ -230,6 +229,23 @@ target_sources(app PRIVATE
     ${DIAG_GENERATED_DIR}/did_safety_wrappers.c
     ${DIAG_GENERATED_DIR}/routine_handlers.c
 )
+
+# ---------------------------------------------------------------------------
+# NVM store: platform-conditional source selection (same pattern as EDS's
+# own examples/basic_ecu/CMakeLists.txt).
+#
+#   native_sim      — nvm_store_mock.c, RAM-backed, no real flash to resolve.
+#   nucleo_h753zi   — nvm_store.c, real NVS backend against the diag_nvs
+#                     partition reserved in boards/nucleo_h753zi.overlay.
+#
+# Exactly one must be compiled per build; both would produce duplicate-
+# symbol linker errors.
+# ---------------------------------------------------------------------------
+if(CONFIG_BOARD_NATIVE_SIM)
+    target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/nvm_store_mock.c)
+else()
+    target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/nvm_store.c)
+endif()
 
 if(NOT DIAG_SKIP_CODEGEN AND TARGET run_codegen)
     add_dependencies(app run_codegen)
