@@ -162,14 +162,30 @@ once, manually, on the bench (see Phase 2 below) — it is not a CI job,
 there is no hardware-in-the-loop runner, and nothing re-verifies it on
 every push.
 
-**The door-ajar monitor has been provoked for real, on the bench, over the
-physical bus** — raw ISO-TP frames (`can-utils`' `isotpsend`/`isotprecv`,
-free, no Pro transport needed), a real AES-128-CMAC SecurityAccess unlock
-computed independently against a live seed, `DoorLockAll` executed for
-real, `BCM_DoorStatus` written open, and DTC `0x041064` confirmed set
-(`59 02 FF 04 10 64 0B` — the exact status bits `bcm_state.c` sets) after
-the debounce window, then confirmed cleared after closing the door and
-re-unlocking. The window-stall monitor has not been exercised this way yet.
+**The full diagnostic surface has been exercised for real, on the bench,
+over the physical bus** — raw ISO-TP frames (`can-utils`' `isotpsend`/
+`isotprecv`, free, no Pro transport needed) and a real AES-128-CMAC
+SecurityAccess unlock computed independently against a live seed:
+
+- Both DTC monitors, set and healed. Door-ajar: `DoorLockAll` executed,
+  `BCM_DoorStatus` written open, DTC `0x041064` confirmed set
+  (`59 02 FF 04 10 64 0B` — the exact status bits `bcm_state.c` sets) after
+  the debounce window, then cleared on closing the door. Window-stall:
+  `BCM_WindowPosition_pct` written out of range (`0xFF`), DTC `0x041165`
+  confirmed set, then cleared on writing a valid position back.
+- Both routines. `DoorLockAll` (above) and `WindowCalibrate`'s full
+  asynchronous walk — `start` acknowledged, `requestRoutineResults` polled
+  ~0.5 s later and returned `[PASS, learned_min=0, learned_max=100]`,
+  matching `bcm_state.c`'s design exactly.
+- All 6 DIDs read. The three standard identity DIDs return the generated
+  stub's deterministic zeros (not yet wired to anything — same as every
+  EDS example until an integrator replaces the stub). `BCM_DoorCycleCount`
+  correctly read back `1` after one earlier `DoorLockAll`, persisting
+  correctly in RAM across every exchange in this session (see
+  [Storage](#storage) for why it won't survive a reset yet).
+
+Not yet exercised this way: DID write-then-fault-clear for the identity
+DIDs (not applicable — they're read-only) and a reset/reboot cycle.
 
 **No secure-boot claim.** EDS ships MCUboot swap and a fail-closed
 image-policy gate, but firmware authenticity/anti-rollback
