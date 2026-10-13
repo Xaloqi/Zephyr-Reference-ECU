@@ -162,14 +162,17 @@ once, manually, on the bench (see Phase 2 below) — it is not a CI job,
 there is no hardware-in-the-loop runner, and nothing re-verifies it on
 every push.
 
-**The door-ajar monitor has been provoked for real, on the bench, over the
+**Both DTC monitors have been provoked for real, on the bench, over the
 physical bus** — raw ISO-TP frames (`can-utils`' `isotpsend`/`isotprecv`,
 free, no Pro transport needed), a real AES-128-CMAC SecurityAccess unlock
-computed independently against a live seed, `DoorLockAll` executed for
-real, `BCM_DoorStatus` written open, and DTC `0x041064` confirmed set
-(`59 02 FF 04 10 64 0B` — the exact status bits `bcm_state.c` sets) after
-the debounce window, then confirmed cleared after closing the door and
-re-unlocking. The window-stall monitor has not been exercised this way yet.
+computed independently against a live seed. Door-ajar: `DoorLockAll`
+executed for real, `BCM_DoorStatus` written open, DTC `0x041064` confirmed
+set (`59 02 FF 04 10 64 0B` — the exact status bits `bcm_state.c` sets)
+after the debounce window, then cleared after closing the door.
+Window-stall: `BCM_WindowPosition_pct` written out of range (`0xFF`), DTC
+`0x041165` confirmed set (`59 02 FF 04 11 65 0B`), then cleared after
+writing a valid position back. Both monitors verified end to end, set and
+heal.
 
 **No secure-boot claim.** EDS ships MCUboot swap and a fail-closed
 image-policy gate, but firmware authenticity/anti-rollback
