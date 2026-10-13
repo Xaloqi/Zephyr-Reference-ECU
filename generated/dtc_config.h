@@ -5,7 +5,7 @@
  *
  * ECU       : ReferenceBCM
  * Version   : 0.1.0
- * Generated : 2026-10-13T18:43:55Z
+ * Generated : 2026-10-13T20:48:00Z
  *
  * PURPOSE: Per-example DTC table, exposed as an X-macro list so any
  *          translation unit that already links against this example's

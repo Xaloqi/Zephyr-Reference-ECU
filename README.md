@@ -50,9 +50,9 @@ model the kind of commands a real BCM receives.
 
 | | |
 |---|---|
-| **DIDs** | 6 (3 standard identity, 2 body-state, 1 persisted counter) |
+| **DIDs** | 7 (3 standard identity, 2 body-state, 1 persisted counter, 1 CDA-interop-only — Phase 3) |
 | **DTCs** | 2 |
-| **Routines** | 2 |
+| **Routines** | 3 (2 application, 1 CDA-interop-only — Phase 3) |
 | **Transport** | CAN / ISO-TP — loopback on `native_sim`, real CAN confirmed on `nucleo_h753zi` (Phase 2) |
 | **RTOS** | Zephyr v3.7.0 |
 
@@ -66,6 +66,7 @@ model the kind of commands a real BCM receives.
 | `0x0410` | BCM_DoorStatus | 1 | read, write | bit0-3 = FL/FR/RL/RR, 1=open. Writable because `native_sim` has no real door sensors — a test campaign *injects* this signal, same pattern as EDS's own [`vehicle_state_ecu`](https://github.com/Xaloqi/EDS/tree/main/examples/vehicle_state_ecu) example |
 | `0x0411` | BCM_WindowPosition_pct | 1 | read, write | 0-100%. Same injection pattern |
 | `0x0412` | BCM_DoorCycleCount | 4 | read, write | Backed by `src/bcm_storage.c` — see [Storage](#storage) |
+| `0xF100` | Identification | 3 | read | CDA-interop-only, fixed value `0xFF0000` — see [Phase 3](#phase-3--eclipse-opensovd-cda-interop-optional-never-a-dependency) |
 
 ### DTCs
 
@@ -80,6 +81,7 @@ model the kind of commands a real BCM receives.
 |---|---|---|
 | `0x0420` | DoorLockAll | `start`: locks all doors, arms the door-ajar monitor, increments the persisted cycle count. `results`: `[lock_state, door_status]` |
 | `0x0421` | WindowCalibrate | Asynchronous: `start` begins a 4-tick learn-the-end-stops walk; `results` polls `[status, learned_min_pct, learned_max_pct]` |
+| `0x1001` | SelfTest | CDA-interop-only stub, no application logic — see [Phase 3](#phase-3--eclipse-opensovd-cda-interop-optional-never-a-dependency) |
 
 ---
 
@@ -248,15 +250,53 @@ A documented part is an instruction; an undocumented one is friction.
 
 ---
 
-## Relationship to Eclipse OpenSOVD / AGL SoDeV
+## Phase 3 — Eclipse OpenSOVD CDA interop (optional, never a dependency)
 
-**None, yet, in this phase.** A later phase may demonstrate this ECU
-answering the Eclipse OpenSOVD Classic Diagnostic Adapter over real CAN —
-already proven possible with EDS directly — as an optional, demonstrated
-integration, never a dependency. This repo makes **no claim of AGL, SoDeV,
-or Eclipse endorsement or affiliation** of any kind; those are independent
-projects and this is an independent, unaffiliated reference application
-built against EDS.
+```bash
+bash scripts/demo_sovd_cda_real_hw.sh
+```
+
+With this firmware flashed and `slcan0` (or any host SocketCAN interface)
+on the real bus, this one command builds the real Eclipse OpenSOVD Classic
+Diagnostic Adapter (CDA) from its own public source (Apache-2.0, cached
+after the first run) and proves it talking real SOVD-over-CAN to this
+real ECU: discovery, an ISO-TP read, session control, a real AES-128-CMAC
+SecurityAccess unlock computed independently against a live seed, and a
+real RoutineControl execution — confirmed, not assumed, by actually
+running it. This absorbs
+[Xaloqi/EDS's own BUILD-1 capability](https://github.com/Xaloqi/EDS/blob/main/scripts/demo_can_sovd_cda_interop.sh)
+(the script and this capability are otherwise identical) retargeted at
+this repo's real hardware instead of EDS's `native_sim` + `vxcan`.
+
+**This repo makes no claim of AGL, SoDeV, or Eclipse endorsement or
+affiliation** of any kind. Connecting to the CDA needs no permission —
+it's used, not contributed to, and never becomes a dependency: nothing
+else in this repo requires it, and if the CDA breaks across its own
+pre-1.0 releases, this repo does not break with it.
+
+**Two disclosed CDA-interop-only entries**, same honesty policy as EDS's
+own precedent: DID `0xF100` ("Identification", fixed value `0xFF0000`)
+selects the CDA's own shipped `FLXC1000.mdd` fixture's `Boot_Variant` —
+without it the CDA has no SecurityAccess service to route to at all.
+Routine `0x1001` ("SelfTest") exists only because SOVD resolves
+`/operations/<name>` against whatever ODX database the CDA has loaded,
+not against anything this ECU reports — so matching the fixture's own ID
+is the only way to reach RoutineControl through it, rather than this
+ECU's own `DoorLockAll`/`WindowCalibrate`, which the fixture doesn't know
+about. Neither carries any application logic; see
+`diagnostics_config.yaml`'s own comments. A custom ODX fixture describing
+this ECU's own real identity would be the cleaner alternative — it isn't
+available, for the same reason EDS's own demo documents (the CDA's
+PDX-to-MDD converter isn't publicly distributable).
+
+**What this does not prove**: DoIP (the CDA discovers DoIP gateways only
+by UDP Vehicle Identification, which EDS has never implemented —
+[`EDS#392`](https://github.com/Xaloqi/EDS/issues/392)); the pytest/CAPL
+half of EDS's codegen working without a commercial licence (it does not);
+or this ECU's own door-ajar/window-stall application logic *through SOVD*
+— the CDA's fixture has no route to those at all, so SOVD can't reach
+them. See [Phase 2](#phase-2--real-hardware) for how those were verified
+instead (raw ISO-TP, this repo's own tooling, no CDA involved).
 
 ---
 

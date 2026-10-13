@@ -5,7 +5,7 @@
  *
  * ECU       : ReferenceBCM
  * Version   : 0.1.0
- * Generated : 2026-10-13T18:43:55Z
+ * Generated : 2026-10-13T20:47:59Z
  *
  * PURPOSE: Compile-time constants derived from diagnostics_config.yaml.
  *          Provides all protocol timing parameters, CAN addressing, and
@@ -88,7 +88,7 @@
  * -------------------------------------------------------------------------- */
 
 /** Number of DIDs declared in diagnostics_config.yaml. */
-#define GEN_DID_COUNT             (6U)
+#define GEN_DID_COUNT             (7U)
 
 /** Number of DTCs declared in diagnostics_config.yaml. */
 #define GEN_DTC_COUNT             (2U)
@@ -102,6 +102,6 @@
 
 #define GEN_ECU_NAME            "ReferenceBCM"
 #define GEN_ECU_VERSION         "0.1.0"
-#define GEN_GENERATED_TIMESTAMP "2026-10-13T18:43:55Z"
+#define GEN_GENERATED_TIMESTAMP "2026-10-13T20:47:59Z"
 
 #endif /* GENERATED_CONFIG_H */

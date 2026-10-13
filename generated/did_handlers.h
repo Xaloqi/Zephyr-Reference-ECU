@@ -5,7 +5,7 @@
  *
  * ECU       : ReferenceBCM
  * Version   : 0.1.0
- * Generated : 2026-10-13T18:43:55Z
+ * Generated : 2026-10-13T20:47:59Z
  *
  * PURPOSE: Declarations for all generated DID read/write handler functions
  *          and the generated DID registration entry point.
@@ -43,7 +43,7 @@ extern "C" {
  * Generated DID count for this ECU configuration.
  * Must match GEN_DID_COUNT in generated_config.h.
  */
-#define GEN_DID_HANDLER_COUNT (6U)
+#define GEN_DID_HANDLER_COUNT (7U)
 
 /* --------------------------------------------------------------------------
  * Generated DID read handler declarations
@@ -162,6 +162,25 @@ uds_status_t did_read_bcm_windowposition_pct(
  * @return UDS_STATUS_OK on success.
  */
 uds_status_t did_read_bcm_doorcyclecount(
+    uint8_t  *buf,
+    uint16_t  buf_len,
+    uint16_t *out_len);
+
+/**
+ * @brief Read handler for DID 0xF100 — Identification.
+ *
+ * Min session  : UDS_SESSION_DEFAULT
+ * Security level: 0
+ * Data length  : 3 byte(s)
+ *
+ * TODO [APPLICATION]: Implement to return current sensor / ECU data for Identification.
+ *
+ * @param[out] buf      Output buffer for DID data.
+ * @param[in]  buf_len  Size of buf in bytes (must be >= 3).
+ * @param[out] out_len  Set to number of bytes written.
+ * @return UDS_STATUS_OK on success.
+ */
+uds_status_t did_read_identification(
     uint8_t  *buf,
     uint16_t  buf_len,
     uint16_t *out_len);
