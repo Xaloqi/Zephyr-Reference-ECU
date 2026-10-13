@@ -300,6 +300,59 @@ instead (raw ISO-TP, this repo's own tooling, no CDA involved).
 
 ---
 
+## Phase 4 — DoIP (gated; secure boot tracked separately)
+
+**DoIP, not combined with CAN.** `src/main_doip.c` is a separate,
+alternate entry point — `CMakeLists.txt`'s `DIAG_DOIP_ONLY_BUILD` option
+selects it *instead of* `src/main.c`, never both in the same image. Xaloqi
+EDS ships no example, and no proven architecture, for running CAN and
+DoIP concurrently against the same session/security state safely — EDS's
+own architecture note designed that ("the diagnostic executor") and
+deliberately deferred building it. Attempting that concurrency ourselves,
+unproven, would be materially riskier than adding DoIP — see
+`src/main_doip.c`'s own header comment.
+
+```bash
+# native_sim (loopback only — reachable from inside the process, not the
+# host; a disclosed, pre-existing Zephyr/native_sim limitation, not
+# something this repo can fix):
+west build -b native_sim . -- -DDIAG_DOIP_ONLY_BUILD=ON \
+    -DEXTRA_CONF_FILE=boards/native_sim_doip.conf
+
+# real hardware — needs JP6/JP7 ON and a direct Ethernet link to the host
+# (see the bill of materials in Phase 2):
+west build -b nucleo_h753zi . -- -DDIAG_SKIP_CODEGEN=ON -DDIAG_DOIP_ONLY_BUILD=ON \
+    -DEXTRA_CONF_FILE=boards/nucleo_h753zi_doip.conf
+west flash
+```
+
+**Confirmed**: builds clean on both targets, and boots and runs correctly
+on `native_sim` (`UDS stack ready: 7 DIDs 2 DTCs`, DoIP listening on port
+13400).
+
+**Not confirmed, disclosed rather than hidden**: on real `nucleo_h753zi`
+hardware, this build hangs early in boot — before the firmware's own
+first log line, with JP6/JP7 set and a live Ethernet link to the host.
+Confirmed genuinely hung, not a cable or baud-rate artifact (both checked
+directly): a program-counter trace across repeated halt/resume cycles
+shows execution reaching a fixed address and then **never advancing
+again** on subsequent samples — a tight loop, not a crash, most likely
+inside the Ethernet/PHY init sequence that runs automatically before
+`main()`. Root-causing a stuck MDIO/RMII sequence needs a scope or logic
+analyzer on the bus, which is bench work, not something resolved by more
+flash/reset cycles — parked here as an open, disclosed limitation rather
+than guessed at further.
+
+**Secure boot**: not implemented in this phase. EDS ships MCUboot swap,
+an image-policy gate, and a fail-closed production guard; firmware
+authenticity and anti-rollback ([`EDS#319`](https://github.com/Xaloqi/EDS/issues/319))
+is open upstream and explicitly excluded here, same as every other phase
+in this repo — "reference ECU with secure boot" means wiring up exactly
+what EDS ships today and saying so plainly, not building #319 first.
+Tracked as a separate, later piece of work; not started in this PR.
+
+---
+
 ## Licence
 
 This repository's own code: **Apache-2.0** (`LICENSE`). What it depends on
