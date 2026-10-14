@@ -48,6 +48,9 @@
 #include "zephyr_timer.h"
 #include "zephyr_wdt.h"
 #include "nvm_store.h"
+#if defined(DIAG_NVM_BACKEND_APPEND)
+#include "nvm_store_append.h"              /* nvm_store_append_set_wdt() */
+#endif
 #if defined(DIAG_SECURE_BOOT_BUILD)
 #include "zephyr_flash_ops.h"              /* zephyr_flash_ops_set_wdt() */
 #include "zephyr_mcuboot_image_policy.h"   /* zephyr_mcuboot_image_policy_init() */
@@ -277,6 +280,15 @@ int main(void)
     zephyr_flash_ops_set_wdt(&s_wdt);
 #endif
 
+#if defined(DIAG_NVM_BACKEND_APPEND)
+    /* Same reasoning as zephyr_flash_ops_set_wdt() above, for the append-
+     * only NVM backend's own one bounded bank-erase call (see
+     * platform/zephyr/nvm_store_append.c). Must run before nvm_store_init()
+     * below. Adapted verbatim from EDS's own
+     * examples/safeboot_ecu/src/main.c. */
+    nvm_store_append_set_wdt(&s_wdt);
+#endif
+
     status = diag_timer_init(&s_tick_timer, on_tick, NULL);
     if (status != UDS_STATUS_OK) { LOG_ERR("Timer init failed."); return -1; }
 
@@ -303,8 +315,13 @@ int main(void)
      * partition to resolve — nvm_store_init() ignores cfg entirely, NULL
      * is correct there (see EDS's nvm_store.h: "may be NULL on host").
      *
-     * nucleo_h753zi: real NVS backend (nvm_store.c) against the diag_nvs
-     * partition reserved in boards/nucleo_h753zi.overlay. FIXED_PARTITION_*
+     * nucleo_h753zi: the append-only backend (nvm_store_append.c, EDS#304)
+     * against the diag_nvs partition reserved in boards/nucleo_h753zi.overlay
+     * — matches CMakeLists.txt's DIAG_NVM_BACKEND_APPEND source selection
+     * for this board, and EDS's own examples/safeboot_ecu's identical
+     * choice for the same part. nvm_store.c's classic NVS backend cannot
+     * mount this partition at all here: STM32H753's uniform 128 KB erase
+     * sectors exceed nvs_fs.sector_size's uint16_t range. FIXED_PARTITION_*
      * macros take the DTS *node label* (eds_nvs_slot), not the partition's
      * string "label" property ("diag_nvs") — same distinction EDS's own
      * basic_ecu/src/main.c documents for the identical pattern.
