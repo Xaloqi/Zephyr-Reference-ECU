@@ -244,10 +244,6 @@ reset. The console is on the ST-LINK VCP; on a typical Linux host that
 enumerated as `/dev/ttyACM2`, not `ttyACM0`, and a wrong port looks exactly
 like a dead board.
 
-**Known limitation, upstream:** S3 expires after ~10 s instead of the
-configured 5 s, because the tick task's `k_msleep(1)` loop takes ~2 ms per
-1 ms tick ([`EDS#401`](https://github.com/Xaloqi/EDS/issues/401)).
-
 The earlier "silent board" was an unfed watchdog, not a power
 problem — history in
 [`#7`](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/7).
