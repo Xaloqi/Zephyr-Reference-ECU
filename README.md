@@ -330,36 +330,46 @@ west flash
 on `native_sim` (`UDS stack ready: 7 DIDs 2 DTCs`, DoIP listening on port
 13400).
 
-**Not confirmed, disclosed rather than hidden**: on real `nucleo_h753zi`
-hardware, this build produces no console output at all — before the
-firmware's own first log line, with JP6/JP7 set and a live Ethernet link
-to the host. Not a cable or baud-rate artifact (both checked directly).
+**Root cause found**: on real `nucleo_h753zi` hardware, this build
+produces no console output at all — before the firmware's own first log
+line, with JP6/JP7 set and a live Ethernet link to the host. Not a cable
+or baud-rate artifact (both checked directly).
 
-Diagnosed as far as remote probing over ST-LINK/OpenOCD can honestly take
-it, and the findings disagree with each other rather than converging:
+An earlier pass at this (visible in `#7`'s history) used ST-LINK's legacy
+HLA transport and got two probes that disagreed with each other, which
+was wrongly written up as needing a real JTAG session or a scope. Redone
+with OpenOCD's newer DAP-direct transport (`interface/stlink-dap.cfg`,
+`transport select dapdirect_swd` — the *same* onboard ST-LINK V3, no new
+hardware) the two probes still looked contradictory at first — a 15-sample
+PC trace over 30 real seconds landed on the exact same address every
+time (`arch_cpu_idle`), while SysTick reads 300 ms apart showed genuinely
+different, smoothly-decreasing values. Both are explained at once by a
+single cause: **the board is repeatedly resetting itself**. SysTick
+re-initializes and counts down fresh after each reset, so 300 ms-apart
+samples just caught different reset cycles rather than one continuous
+run; the PC trace keeps landing in the same early idle code because the
+board never gets further than that before resetting again.
 
-- A 25-sample program-counter trace (explicit resume → run 100 ms → halt
-  → read PC, repeated) landed on the **exact same address** every time
-  across 2.5 real seconds — the signature of a genuine stall, not normal
-  idling (the address resolves into Zephyr's own `arch_cpu_idle`, but
-  healthy idling still shows *some* PC variation from periodic tick
-  interrupts; this showed none).
-- Checking whether the system tick timer was even advancing gave a
-  **contradictory** result: a register read taken while the core was
-  (unintentionally) still halted from the prior test showed it frozen —
-  not real evidence, just a confounded test. Redone properly (explicit
-  resume, then read), the timer's value had genuinely changed, arguing
-  *against* a true stall. A second read in that same sequence then failed
-  with `target not halted`, exposing that resume/halt/read sequencing
-  over ST-LINK's HLA transport isn't behaving predictably enough here to
-  trust further without better tooling.
+Confirmed directly by reading `RCC_RSR` (reset-status register,
+`0x58024400 + 0xD0`): cleared all flags by writing RMVF, let the core
+free-run for 5 real seconds with no manual reset asserted, then re-read.
+**CPURSTF, D1RSTF, PORRSTF, and WWDG1RSTF came back freshly set from
+zero** within that window. `PORRSTF` re-latching during normal operation
+only happens on a genuine brownout. `zephyr_wdt.c` isn't even compiled
+into this build (`CMakeLists.txt` only adds it in the CAN-transport
+branch), ruling out the app's own IWDG as the watchdog-flag source — this
+points to a **power brownout when the Ethernet PHY/MAC powers up**,
+something the CAN-only build never triggers since it never touches
+Ethernet hardware.
 
-Rather than force a confident root cause from unreliable signals, this is
-left as a genuinely open, honestly-scoped finding: something is wrong on
-real hardware, probing attempts so far don't agree on what, and resolving
-it needs either a real JTAG session (not ST-LINK's HLA transport) or
-physical instrumentation — not more of the same remote register reads.
-Tracked as [`#7`](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/7).
+**What this means for hardware prep**: no JTAG probe, scope, or logic
+analyzer needed — the onboard ST-LINK V3 was sufficient once the right
+OpenOCD transport was used. The next concrete thing to try is powering
+the board from a dedicated 5V supply (bench supply or the `E5V` pin)
+instead of USB bus power alone, and/or a different USB port/cable with
+more current headroom, before assuming a code-level fix is needed.
+Tracked, with the full probe history and root cause, at
+[`#7`](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/7).
 
 ### Secure boot — confirmed working on real hardware
 
