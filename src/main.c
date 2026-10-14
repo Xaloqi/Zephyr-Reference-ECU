@@ -262,9 +262,6 @@ int main(void)
 
     LOG_INF("Xaloqi Zephyr-Reference-ECU: ReferenceBCM starting");
 
-    bcm_storage_init();
-    bcm_state_init();
-
     if (diag_mutex_init(&s_session_lock)  != UDS_STATUS_OK) { return -1; }
     if (diag_mutex_init(&s_security_lock) != UDS_STATUS_OK) { return -1; }
 
@@ -352,9 +349,19 @@ int main(void)
     }
 #endif
     if (status != UDS_STATUS_OK) {
-        LOG_ERR("NVM store init failed: 0x%02X — DTC mirror will not "
-                "survive reset this run.", (unsigned)status);
+        LOG_ERR("NVM store init failed: 0x%02X — DTC mirror and the "
+                "persisted door-cycle count will not survive reset this "
+                "run.", (unsigned)status);
     }
+
+    /*
+     * [EDS#304] bcm_storage_init() (via bcm_state_init()) now persists
+     * BCM_DoorCycleCount through EDS's own nvm_store, so it must run after
+     * nvm_store_init() above, not before -- reading from an uninitialized
+     * store would fail every boot. See src/bcm_storage.c.
+     */
+    bcm_storage_init();
+    bcm_state_init();
 
     /*
      * Security algorithm init — no TRNG on native_sim (CI / development

@@ -183,14 +183,15 @@ int main(void)
     LOG_INF("DoIP logical address: 0x%04X  port: %u",
             (unsigned)DOIP_ECU_LOGICAL_ADDR, (unsigned)DOIP_PORT);
 
-    bcm_storage_init();
-    bcm_state_init();
-
     LOG_WRN("[SEC] Using placeholder AES keys — inject OEM keys before production.");
     (void)uds_security_algo_set_rng_cb(NULL);
 
     /* Same native_sim-vs-real-hardware split as src/main.c — see that
-     * file's identical comment for the FIXED_PARTITION_* rationale. */
+     * file's identical comment for the FIXED_PARTITION_* rationale. This
+     * build has no watchdog instance at all (zephyr_wdt.c isn't compiled
+     * into DIAG_DOIP_ONLY_BUILD -- see CMakeLists.txt), so unlike main.c
+     * there is no nvm_store_append_set_wdt() call to make here; EDS
+     * documents that call as optional. */
 #if defined(CONFIG_BOARD_NATIVE_SIM)
     status = nvm_store_init(NULL);
 #else
@@ -217,9 +218,18 @@ int main(void)
     }
 #endif
     if (status != UDS_STATUS_OK) {
-        LOG_ERR("NVM store init failed: 0x%02X — DTC mirror will not "
-                "survive reset this run.", (unsigned)status);
+        LOG_ERR("NVM store init failed: 0x%02X — DTC mirror and the "
+                "persisted door-cycle count will not survive reset this "
+                "run.", (unsigned)status);
     }
+
+    /*
+     * [EDS#304] bcm_storage_init() (via bcm_state_init()) now persists
+     * BCM_DoorCycleCount through EDS's own nvm_store, so it must run after
+     * nvm_store_init() above, not before. See src/bcm_storage.c.
+     */
+    bcm_storage_init();
+    bcm_state_init();
 
     /*
      * UDS stack init — DoIP build passes NULL for the CAN transport: the
