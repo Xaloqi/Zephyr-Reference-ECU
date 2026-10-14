@@ -233,12 +233,22 @@ west flash
 **Confirmed on `native_sim`**: boots and runs correctly (`UDS stack ready:
 7 DIDs 2 DTCs`, DoIP listening on port 13400).
 
-**Boots on real hardware** (NUCLEO-H753ZI): UDS stack ready, DoIP
-listening on port 13400, Ethernet link up ~3.3 s after reset. The console
-is on the ST-LINK VCP — on a typical Linux host that enumerated as
-`/dev/ttyACM2`, not `ttyACM0`; a wrong port looks exactly like a dead
-board. A full tester session over the real Ethernet link has not yet been
-recorded. The earlier "silent board" was an unfed watchdog, not a power
+**Confirmed on real hardware** (NUCLEO-H753ZI, direct Ethernet link):
+routing activation, DID reads, extended session, AES-CMAC SecurityAccess,
+`DoorLockAll`, and `BCM_DoorCycleCount` read back after a real reset. A
+tester may now pause between requests: the session and SecurityAccess
+unlock hold across a 2 s TesterPresent cadence. Before
+[`EDS#400`](https://github.com/Xaloqi/EDS/issues/400) the connection was
+dropped after ~150 ms of silence. The ECU is reachable about 3.5–4 s after
+reset. The console is on the ST-LINK VCP; on a typical Linux host that
+enumerated as `/dev/ttyACM2`, not `ttyACM0`, and a wrong port looks exactly
+like a dead board.
+
+**Known limitation, upstream:** S3 expires after ~10 s instead of the
+configured 5 s, because the tick task's `k_msleep(1)` loop takes ~2 ms per
+1 ms tick ([`EDS#401`](https://github.com/Xaloqi/EDS/issues/401)).
+
+The earlier "silent board" was an unfed watchdog, not a power
 problem — history in
 [`#7`](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/7).
 
@@ -250,7 +260,7 @@ EDS's `eds_doip_set_checkin_callback()`
 a request dispatch hung while holding the UDS locks, or a DoIP server
 thread wedged on its socket or exited all reset the ECU. An idle server
 with no client checks in every 5 s and is not reset. A dead Ethernet link
-is not detected. Boot before `main()` (which waits ~1.5 s for the network)
+is not detected. Boot before `main()` (which waits 1.5–4.1 s for the network)
 is unsupervised. The exact claim is in `src/main_doip.c`'s header; read it
 before relying on more.
 
