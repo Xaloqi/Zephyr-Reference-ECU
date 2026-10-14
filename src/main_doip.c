@@ -47,6 +47,31 @@
  *   doip_thread   — started via a semaphore (zephyr_lwip.c), runs
  *                   eds_doip_server_run().
  *
+ * WATCHDOG SUPERVISION — read this before claiming more than it says:
+ *   The hardware watchdog (IWDG, CONFIG_DIAG_WDT_WINDOW_MS) is armed at the
+ *   top of main() and fed ONLY from uds_tick_task's loop. A watchdog fed
+ *   from one thread supervises that thread, so this covers exactly:
+ *     - the UDS tick path: S3 session timeout, SecurityAccess lockout,
+ *       periodic scheduling, bcm_state_monitor_tick() (incl. its NVM
+ *       persist — a bank erase is bridged by nvm_store_append_set_wdt());
+ *     - UDS request dispatch from the DoIP thread, but only while it holds
+ *       s_session_lock/s_security_lock — the tick task blocks on the same
+ *       locks, so a dispatch that hangs holding them starves the feed;
+ *     - any thread at equal or higher priority than the tick task (5)
+ *       monopolising the CPU — main (0), the Ethernet RX thread (2), the
+ *       cooperative net RX and system work-queue threads — and the kernel
+ *       tick itself. doip_thread (7) is lower and is NOT covered this way.
+ *   It does NOT supervise the DoIP transport: doip_thread wedged in
+ *   accept/recv/send, doip_thread having exited (eds_doip_server_run()
+ *   returns on a fatal error), or the Ethernet link/driver being dead. The
+ *   tick task keeps feeding through all of those. Supervising the server
+ *   loop needs a check-in point inside eds_doip_server_run() that EDS does
+ *   not expose — an EDS API question, not something to fake here (e.g. by
+ *   counting thread runtime: a server idling in its 5 s accept poll with
+ *   no client is healthy and must not look hung).
+ *   Boot before main() is NOT supervised either — see
+ *   boards/nucleo_h753zi_doip.conf for why it cannot be on this variant.
+ *
  * BUILDING:
  *   west build -b native_sim .    -- -DDIAG_DOIP_ONLY_BUILD=ON
  *   west build -b nucleo_h753zi . -- -DDIAG_DOIP_ONLY_BUILD=ON \
@@ -74,7 +99,11 @@
 #include "platform_doip.h"   /* eds_doip_platform_start() */
 #include "doip_server.h"     /* DOIP_PORT */
 #include "zephyr_mutex.h"
+#include "zephyr_wdt.h"
 #include "nvm_store.h"
+#if defined(DIAG_NVM_BACKEND_APPEND)
+#include "nvm_store_append.h"   /* nvm_store_append_set_wdt() */
+#endif
 
 /* --------------------------------------------------------------------------
  * Generated headers (from diagnostics_config.yaml via EDS's codegen.py)
@@ -123,6 +152,10 @@ static struct k_thread s_tick_thread;
 static diag_mutex_t s_session_lock;
 static diag_mutex_t s_security_lock;
 
+/* Fed only by uds_tick_task — see "WATCHDOG SUPERVISION" in the header for
+ * exactly what that does and does not cover. */
+static diag_wdt_t   s_wdt;
+
 static void doip_lock_cb(void)
 {
     (void)diag_mutex_lock(&s_session_lock);
@@ -167,6 +200,10 @@ static void uds_tick_task_entry(void *p1, void *p2, void *p3)
         (void)diag_mutex_unlock(&s_session_lock);
 
         bcm_state_monitor_tick();
+
+        /* The only feed in this build. Placed after the lock pair so a
+         * dispatch hung while holding the locks stops it (see header). */
+        (void)diag_wdt_feed(&s_wdt);
     }
 }
 
@@ -186,12 +223,34 @@ int main(void)
     LOG_WRN("[SEC] Using placeholder AES keys — inject OEM keys before production.");
     (void)uds_security_algo_set_rng_cb(NULL);
 
+    /*
+     * Arm the watchdog here, explicitly — Zephyr's boot-time arming is off
+     * for this variant (boards/nucleo_h753zi_doip.conf). Same position as
+     * src/main.c, so the init below runs inside the window too; it takes
+     * ~1 ms on hardware, and the tick task's first feed follows it.
+     *
+     * Fail closed, unlike main.c's (void) cast: there, a failed init still
+     * leaves Zephyr's boot-armed IWDG running, so the board resets loudly.
+     * Here nothing else would arm it, and ignoring the result would mean
+     * running unsupervised while appearing supervised (EDS#306's class).
+     * On native_sim (CONFIG_WATCHDOG=n) this returns OK in degraded mode.
+     * Every `return -1` after this point therefore ends in a watchdog
+     * reset on hardware, exactly as in main.c.
+     */
+    if (diag_wdt_init(&s_wdt) != UDS_STATUS_OK) {
+        LOG_ERR("Watchdog arming failed — refusing to run unsupervised.");
+        return -1;
+    }
+
+#if defined(DIAG_NVM_BACKEND_APPEND)
+    /* Bridges the watchdog across the append backend's one bounded bank
+     * erase, which can block far past the 100 ms window. Must run before
+     * nvm_store_init(). Same call as src/main.c. */
+    nvm_store_append_set_wdt(&s_wdt);
+#endif
+
     /* Same native_sim-vs-real-hardware split as src/main.c — see that
-     * file's identical comment for the FIXED_PARTITION_* rationale. This
-     * build has no watchdog instance at all (zephyr_wdt.c isn't compiled
-     * into DIAG_DOIP_ONLY_BUILD -- see CMakeLists.txt), so unlike main.c
-     * there is no nvm_store_append_set_wdt() call to make here; EDS
-     * documents that call as optional. */
+     * file's identical comment for the FIXED_PARTITION_* rationale. */
 #if defined(CONFIG_BOARD_NATIVE_SIM)
     status = nvm_store_init(NULL);
 #else

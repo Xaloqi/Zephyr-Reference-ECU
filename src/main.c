@@ -262,6 +262,19 @@ int main(void)
 
     LOG_INF("Xaloqi Zephyr-Reference-ECU: ReferenceBCM starting");
 
+#if defined(CONFIG_IWDG_STM32_INITIAL_TIMEOUT) && !defined(CONFIG_WDT_DISABLE_AT_BOOT)
+    /* Zephyr armed the IWDG before main() and this build relies on reaching
+     * the feed loop inside that window (boards/nucleo_h753zi.conf). Uptime
+     * starts before the IWDG does, so this overstates elapsed watchdog time
+     * — a conservative early warning before a slower pre-main turns into
+     * issue #7's silent reset loop. */
+    if (k_uptime_get_32() > ((uint32_t)CONFIG_IWDG_STM32_INITIAL_TIMEOUT / 2U)) {
+        LOG_WRN("WDT: main() reached at %u ms — over half the %u ms "
+                "boot-armed watchdog window.", (unsigned)k_uptime_get_32(),
+                (unsigned)CONFIG_IWDG_STM32_INITIAL_TIMEOUT);
+    }
+#endif
+
     if (diag_mutex_init(&s_session_lock)  != UDS_STATUS_OK) { return -1; }
     if (diag_mutex_init(&s_security_lock) != UDS_STATUS_OK) { return -1; }
 
