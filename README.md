@@ -242,13 +242,17 @@ recorded. The earlier "silent board" was an unfed watchdog, not a power
 problem — history in
 [`#7`](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/7).
 
-**Watchdog: the UDS tick path is supervised, the DoIP transport is not.**
-The IWDG is armed in `main()` and fed only from the UDS tick task, so a
-hung tick loop, or a request dispatch hung while holding the UDS locks,
-resets the ECU; a DoIP server thread wedged on its socket does not. Boot
-before `main()` (which waits ~1.5 s for the network) is unsupervised. The
-exact claim is in `src/main_doip.c`'s header; read it before relying on
-more.
+**Watchdog: the UDS tick path and the DoIP server loop are supervised.**
+The IWDG is armed in `main()` and fed only from the UDS tick task. It
+feeds only while the DoIP server loop has checked in recently, through
+EDS's `eds_doip_set_checkin_callback()`
+([`EDS#399`](https://github.com/Xaloqi/EDS/issues/399)). A hung tick loop,
+a request dispatch hung while holding the UDS locks, or a DoIP server
+thread wedged on its socket or exited all reset the ECU. An idle server
+with no client checks in every 5 s and is not reset. A dead Ethernet link
+is not detected. Boot before `main()` (which waits ~1.5 s for the network)
+is unsupervised. The exact claim is in `src/main_doip.c`'s header; read it
+before relying on more.
 
 ### Secure boot — confirmed working, both directions
 

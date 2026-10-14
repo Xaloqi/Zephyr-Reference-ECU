@@ -61,14 +61,18 @@
  *       monopolising the CPU — main (0), the Ethernet RX thread (2), the
  *       cooperative net RX and system work-queue threads — and the kernel
  *       tick itself. doip_thread (7) is lower and is NOT covered this way.
- *   It does NOT supervise the DoIP transport: doip_thread wedged in
- *   accept/recv/send, doip_thread having exited (eds_doip_server_run()
- *   returns on a fatal error), or the Ethernet link/driver being dead. The
- *   tick task keeps feeding through all of those. Supervising the server
- *   loop needs a check-in point inside eds_doip_server_run() that EDS does
- *   not expose — an EDS API question, not something to fake here (e.g. by
- *   counting thread runtime: a server idling in its 5 s accept poll with
- *   no client is healthy and must not look hung).
+ *   [EDS#399] The DoIP server loop is supervised too, through EDS's
+ *   check-in callback: doip_thread checks in on every wake of
+ *   eds_doip_server_run() (each accept poll, each recv, each dispatch), and
+ *   the tick task feeds only while the last check-in is less than
+ *   DOIP_SUPERVISION_WINDOW_MS old. An idle server with no client still
+ *   wakes every DOIP_ACCEPT_POLL_TIMEOUT_MS (5 s) and so never looks hung.
+ *   Covered: doip_thread wedged in accept/recv/send or a dispatch, or
+ *   having exited. Note what that includes: a tester that stops reading
+ *   its socket can block tcp_send() indefinitely, and that now resets the
+ *   ECU instead of silently killing DoIP until power-cycled.
+ *   NOT covered: the Ethernet link or driver being dead. With no link,
+ *   accept still times out and checks in, so that is reported healthy.
  *   Boot before main() is NOT supervised either — see
  *   boards/nucleo_h753zi_doip.conf for why it cannot be on this variant.
  *
@@ -121,6 +125,7 @@
  * Zephyr headers
  * -------------------------------------------------------------------------- */
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/flash.h>
 #include <zephyr/logging/log.h>
@@ -156,6 +161,18 @@ static diag_mutex_t s_security_lock;
  * exactly what that does and does not cover. */
 static diag_wdt_t   s_wdt;
 
+/* [EDS#399] DoIP server-loop check-ins, counted on doip_thread and read by
+ * uds_tick_task. The window is the longest wait EDS bounds between
+ * check-ins (the accept poll with no client), plus margin for one dispatch
+ * and its response send. */
+#define DOIP_SUPERVISION_WINDOW_MS  (DOIP_CHECKIN_MAX_WAIT_MS + 2000U)
+static atomic_t     s_doip_checkins;
+
+static void doip_checkin_cb(void)
+{
+    (void)atomic_inc(&s_doip_checkins);
+}
+
 static void doip_lock_cb(void)
 {
     (void)diag_mutex_lock(&s_session_lock);
@@ -190,6 +207,11 @@ static void uds_tick_task_entry(void *p1, void *p2, void *p3)
 
     LOG_INF("UDS tick task started");
 
+    /* [EDS#399] Time of the last DoIP check-in seen. Starts now, so a DoIP
+     * thread that never starts is caught one window after boot. */
+    atomic_val_t doip_seen       = atomic_get(&s_doip_checkins);
+    int64_t      doip_checkin_ms = k_uptime_get();
+
     while (true) {
         k_msleep(1);
         (void)diag_mutex_lock(&s_session_lock);
@@ -201,9 +223,19 @@ static void uds_tick_task_entry(void *p1, void *p2, void *p3)
 
         bcm_state_monitor_tick();
 
+        /* [EDS#399] Feed only while the DoIP server loop is alive. */
+        atomic_val_t doip_now = atomic_get(&s_doip_checkins);
+        int64_t      now_ms   = k_uptime_get();
+        if (doip_now != doip_seen) {
+            doip_seen       = doip_now;
+            doip_checkin_ms = now_ms;
+        }
+
         /* The only feed in this build. Placed after the lock pair so a
          * dispatch hung while holding the locks stops it (see header). */
-        (void)diag_wdt_feed(&s_wdt);
+        if ((now_ms - doip_checkin_ms) < (int64_t)DOIP_SUPERVISION_WINDOW_MS) {
+            (void)diag_wdt_feed(&s_wdt);
+        }
     }
 }
 
@@ -322,6 +354,7 @@ int main(void)
         return -1;
     }
     eds_doip_set_lock_callbacks(doip_lock_cb, doip_unlock_cb);
+    eds_doip_set_checkin_callback(doip_checkin_cb);
 
     (void)k_thread_create(
         &s_tick_thread, s_tick_stack,
