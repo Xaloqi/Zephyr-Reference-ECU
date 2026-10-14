@@ -64,14 +64,15 @@ actuations model the kind of commands a real BCM receives.
 
 ### Storage
 
-`BCM_DoorCycleCount` is backed by `src/bcm_storage.c`, a persistence
-boundary separate from EDS's own NVM store (which belongs to the
-diagnostics layer and is not this module's concern). **Still a
-RAM-backed stub on real hardware**, blocked on the same STM32H7 NVS
-sector-size incompatibility covered under
-[Run it on a board](#run-it-on-a-board) — the API is the real, permanent
-boundary; only the backing implementation changes once that's resolved
-upstream.
+`BCM_DoorCycleCount` is backed by `src/bcm_storage.c`, persisted through
+EDS's own `nvm_store` under an app-defined key — see
+[Run it on a board](#run-it-on-a-board) for why that's the right call now
+rather than a separate mechanism. **Confirmed surviving a real hardware
+reset**, not just built: `DoorLockAll` executed, the count read back
+correctly, a hardware reset asserted (not a reflash), and the count read
+back unchanged — the boot log shows it restored from NVM before any CAN
+traffic that boot. Repeated twice across this session (count 1, then 2),
+both times correct.
 
 ---
 
@@ -134,15 +135,20 @@ the physical CAN bus (`7DF#023E00`) gets a real positive response
 (`7E8#027E00`) — genuine ISO-TP + UDS dispatch on real silicon, not a log
 message.
 
-**One real, known limitation.** DTC-mirror persistence (and
-`BCM_DoorCycleCount`, above) fails to initialize on this board:
-`fs_nvs: Invalid sector size`. Root-caused upstream as
-[Xaloqi/EDS#304](https://github.com/Xaloqi/EDS/issues/304): Zephyr's NVS
-subsystem stores its sector size in a 16-bit field (max 64 KB), but the
-STM32H7's native flash erase sector is 128 KB — no value satisfies both,
-on this chip or any STM32H7 board. Non-fatal (the firmware logs the error
-and continues, same as EDS's own `safeboot_ecu`) — DTCs still work over
-this boot, they just don't survive a reset.
+**Resolved, not just worked around.** This board's NVM persistence
+(DTC-mirror and `BCM_DoorCycleCount`, above) used to fail outright —
+`fs_nvs: Invalid sector size` — because Zephyr's NVS subsystem stores its
+sector size in a 16-bit field (max 64 KB) while the STM32H7's native flash
+erase sector is 128 KB, a mismatch no value could satisfy, on this chip or
+any STM32H7 board. [Xaloqi/EDS#304](https://github.com/Xaloqi/EDS/issues/304)
+replaced the backend with an append-only, log-structured store purpose-built
+for this sector size, hardware-verified on this exact board family.
+`BCM_DoorCycleCount` persisting through a real reset (above) is confirmed
+on this repo's own bench. EDS's own DTC-mirror persistence was not
+independently re-checked this session — the one attempt made was
+confounded by `BCM_DoorStatus` itself being a RAM-only simulated signal
+that resets to "closed" on reboot and heals the DTC as a normal
+consequence, regardless of whether the underlying NVM record survived.
 
 ### Bill of materials
 
@@ -308,7 +314,11 @@ seed:
   why it won't survive a reset yet.
 
 Not yet exercised this way: DID write-then-fault-clear for the identity
-DIDs (not applicable — they're read-only) and a reset/reboot cycle.
+DIDs (not applicable — they're read-only). A reset/reboot cycle *was*
+exercised, separately — see [Storage](#storage) — confirming
+`BCM_DoorCycleCount` specifically; it does not speak to DTC-mirror
+persistence, which that same check could not cleanly isolate (see
+[Run it on a board](#run-it-on-a-board)).
 
 ---
 
