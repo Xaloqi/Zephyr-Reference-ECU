@@ -233,14 +233,22 @@ west flash
 **Confirmed on `native_sim`**: boots and runs correctly (`UDS stack ready:
 7 DIDs 2 DTCs`, DoIP listening on port 13400).
 
-**Not yet working on real hardware.** The board resets repeatedly before
-producing any console output — confirmed via the STM32H7's reset-status
-register, not guessed: several reset-cause flags relatch within 5 seconds
-of a clean start, pointing to a brownout when the Ethernet PHY/MAC powers
-up (the CAN-only build above never exercises it). No new hardware needed
-to chase further — try a dedicated 5 V supply before assuming a code fix.
-Full probe history and root cause:
+**Boots on real hardware** (NUCLEO-H753ZI): UDS stack ready, DoIP
+listening on port 13400, Ethernet link up ~3.3 s after reset. The console
+is on the ST-LINK VCP — on a typical Linux host that enumerated as
+`/dev/ttyACM2`, not `ttyACM0`; a wrong port looks exactly like a dead
+board. A full tester session over the real Ethernet link has not yet been
+recorded. The earlier "silent board" was an unfed watchdog, not a power
+problem — history in
 [`#7`](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/7).
+
+**Watchdog: the UDS tick path is supervised, the DoIP transport is not.**
+The IWDG is armed in `main()` and fed only from the UDS tick task, so a
+hung tick loop, or a request dispatch hung while holding the UDS locks,
+resets the ECU; a DoIP server thread wedged on its socket does not. Boot
+before `main()` (which waits ~1.5 s for the network) is unsupervised. The
+exact claim is in `src/main_doip.c`'s header; read it before relying on
+more.
 
 ### Secure boot — confirmed working, both directions
 
