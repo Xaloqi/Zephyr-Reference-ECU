@@ -276,8 +276,13 @@ else()
         ${DIAG_ROOT}/platform/zephyr/zephyr_can.c
         ${DIAG_ROOT}/platform/zephyr/zephyr_port.c
         ${DIAG_ROOT}/platform/zephyr/zephyr_timer.c
-        ${DIAG_ROOT}/platform/zephyr/zephyr_wdt.c
     )
+    # zephyr_wdt.c is added below, alongside NVM-backend selection, for every
+    # board except nucleo_h753zi (which gets it there instead — see that
+    # block's comment for why).
+    if(NOT CONFIG_BOARD_NUCLEO_H753ZI)
+        target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/zephyr_wdt.c)
+    endif()
     if(DIAG_SECURE_BOOT_BUILD)
         target_sources(app PRIVATE
             # Called from generated/uds_init.c (zephyr_flash_ops_init())
@@ -313,6 +318,13 @@ if(CONFIG_BOARD_NATIVE_SIM)
 elseif(CONFIG_BOARD_NUCLEO_H753ZI)
     target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/nvm_store_append.c)
     target_compile_definitions(app PRIVATE DIAG_NVM_BACKEND_APPEND=1)
+    # nvm_store_append.c calls diag_wdt_feed() unconditionally from its own
+    # erase-feed timer (guarded by a runtime NULL check, not a compile-time
+    # one) -- see that file's s_erase_feed_timer_expiry(). zephyr_wdt.c must
+    # therefore always be linked in for this board, including
+    # DIAG_DOIP_ONLY_BUILD, which never arms or feeds the watchdog itself
+    # (see src/main_doip.c) but still needs the symbol to resolve.
+    target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/zephyr_wdt.c)
 else()
     target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/nvm_store.c)
 endif()
