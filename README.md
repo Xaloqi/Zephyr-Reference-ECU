@@ -359,6 +359,7 @@ left as a genuinely open, honestly-scoped finding: something is wrong on
 real hardware, probing attempts so far don't agree on what, and resolving
 it needs either a real JTAG session (not ST-LINK's HLA transport) or
 physical instrumentation — not more of the same remote register reads.
+Tracked as [`#7`](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/7).
 
 ### Secure boot — confirmed working on real hardware
 
