@@ -295,17 +295,24 @@ endif()
 
 # ---------------------------------------------------------------------------
 # NVM store: platform-conditional source selection (same pattern as EDS's
-# own examples/basic_ecu/CMakeLists.txt).
+# own examples/safeboot_ecu/CMakeLists.txt, the reference for this exact
+# board).
 #
 #   native_sim      — nvm_store_mock.c, RAM-backed, no real flash to resolve.
-#   nucleo_h753zi   — nvm_store.c, real NVS backend against the diag_nvs
-#                     partition reserved in boards/nucleo_h753zi.overlay.
+#   nucleo_h753zi   — nvm_store_append.c, the append-only backend EDS#304
+#                     introduced for STM32H7 boards: their uniform 128 KB
+#                     erase sectors exceed nvs_fs.sector_size's uint16_t
+#                     range, so nvm_store.c's classic NVS backend cannot
+#                     mount this partition at all on this part.
 #
-# Exactly one must be compiled per build; both would produce duplicate-
-# symbol linker errors.
+# Exactly one must be compiled per build; any two would produce duplicate-
+# symbol linker errors (all three define the same nvm_store_* API).
 # ---------------------------------------------------------------------------
 if(CONFIG_BOARD_NATIVE_SIM)
     target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/nvm_store_mock.c)
+elseif(CONFIG_BOARD_NUCLEO_H753ZI)
+    target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/nvm_store_append.c)
+    target_compile_definitions(app PRIVATE DIAG_NVM_BACKEND_APPEND=1)
 else()
     target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/nvm_store.c)
 endif()
