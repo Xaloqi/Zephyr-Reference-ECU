@@ -77,10 +77,32 @@
  *   Boot before main() is NOT supervised either — see
  *   boards/nucleo_h753zi_doip.conf for why it cannot be on this variant.
  *
+ *   [EDS#425] Firmware download (DIAG_SECURE_BOOT_BUILD only). Two flash
+ *   calls run inside a dispatch for longer than the window: each chunked-
+ *   erase step (one 128 KB sector, up to 4 s per the devicetree) and the
+ *   0x37 read-back verify (~34 ms per 256 KiB). For exactly the duration of
+ *   each call, a kernel timer in EDS's zephyr_flash_ops.c feeds the
+ *   watchdog every 20 ms (EDS#312, EDS#428). So DURING ONE OF THOSE CALLS
+ *   neither the tick path nor the DoIP check-in is what keeps the ECU
+ *   alive. A hang inside one is bounded by the flash driver's own timeout
+ *   (2 x max-erase-time = 8 s per wait), not by the watchdog. Between erase
+ *   steps the locks are released, the tick task runs, and everything above
+ *   applies again. On hardware, RCC_RSR stayed 0 and IWDG1 RLR 0x031F,
+ *   sampled every 0.5 s through erase, transfer and verify.
+ *   After the 0x11 reset, MCUboot's swap runs before main() and is
+ *   unsupervised like the rest of boot: measured ~19 s from reset to an
+ *   armed IWDG for a 500 KiB image (swap plus the network wait), ~10 s when
+ *   MCUboot refuses the image.
+ *
  * BUILDING:
  *   west build -b native_sim .    -- -DDIAG_DOIP_ONLY_BUILD=ON
  *   west build -b nucleo_h753zi . -- -DDIAG_DOIP_ONLY_BUILD=ON \
  *       -DEXTRA_CONF_FILE=boards/nucleo_h753zi_doip.conf
+ *   # DoIP + secure boot (firmware update over DoIP) — docs/secure-boot.md:
+ *   west build -b nucleo_h753zi . -- -DDIAG_DOIP_ONLY_BUILD=ON \
+ *       -DDIAG_SECURE_BOOT_BUILD=ON \
+ *       "-DEXTRA_CONF_FILE=boards/nucleo_h753zi_doip.conf;boards/nucleo_h753zi_secureboot.conf" \
+ *       -DDTC_OVERLAY_FILE=boards/nucleo_h753zi_secureboot.overlay
  *
  * SAFETY   : Reference application — not safety-assessed.
  * STANDARD : MISRA C:2012 alignment intended.
@@ -97,6 +119,7 @@
 #include "uds_security_algo.h"
 #include "uds_periodic.h"
 #include "uds_session.h"
+#include "platform_api.h"   /* eds_platform_nvm_flush/_ecu_reset() */
 
 /* --------------------------------------------------------------------------
  * DoIP platform headers
@@ -108,6 +131,12 @@
 #include "nvm_store.h"
 #if defined(DIAG_NVM_BACKEND_APPEND)
 #include "nvm_store_append.h"   /* nvm_store_append_set_wdt() */
+#endif
+#if defined(DIAG_SECURE_BOOT_BUILD)
+#include "zephyr_flash_ops.h"              /* zephyr_flash_ops_init/_set_wdt() */
+#include "zephyr_mcuboot_image_policy.h"   /* zephyr_mcuboot_image_policy_init() */
+#include "services.h"                      /* uds_service_0x34_pending_tick() */
+#include <zephyr/dfu/mcuboot.h>            /* boot_is_img_confirmed() et al. */
 #endif
 
 /* --------------------------------------------------------------------------
@@ -149,10 +178,19 @@ LOG_MODULE_REGISTER(reference_bcm_doip, LOG_LEVEL_INF);
 #define CONFIG_DIAG_TICK_TASK_PRIORITY     (5)
 #endif
 
-/* [EDS#401] Most 1 ms ticks one loop iteration will catch up. A gap this
- * long cannot happen while the 100 ms watchdog window holds; the cap only
- * keeps the catch-up loops bounded. */
+/* [EDS#401] Most 1 ms ticks one loop iteration will catch up; the cap keeps
+ * the catch-up loops bounded. ASSUMPTION: gaps over 1 s don't happen in
+ * normal operation. That holds while the 100 ms watchdog window holds,
+ * EXCEPT during a firmware download (DIAG_SECURE_BOOT_BUILD): each erase
+ * step holds the locks for one sector erase (~0.83 s measured, up to 4 s)
+ * while zephyr_flash_ops.c's timer feeds the watchdog. Time beyond 1 s per
+ * step is dropped, so the SecurityAccess lockout countdown runs long
+ * (the safe direction), and S3 is restarted by doip_pending_cb anyway. */
 #define DIAG_TICK_CATCHUP_MAX_MS           (1000)
+
+/* [EDS#434] Time given to doip_thread to put the 51 xx response on the wire
+ * before an ECUReset is executed. The same 50 ms src/main.c gives ISO-TP. */
+#define DIAG_RESET_TX_GRACE_MS             (50)
 
 K_THREAD_STACK_DEFINE(s_tick_stack, CONFIG_DIAG_TICK_TASK_STACK_SIZE);
 static struct k_thread s_tick_thread;
@@ -190,6 +228,26 @@ static void doip_unlock_cb(void)
     (void)diag_mutex_unlock(&s_security_lock);
     (void)diag_mutex_unlock(&s_session_lock);
 }
+
+#if defined(DIAG_SECURE_BOOT_BUILD)
+/* [EDS#435] EDS restarts S3 when a request arrives, but not when a 0x78
+ * request finishes, and S3 keeps counting through the chunked erase. Measured:
+ * a tester pausing 1.5 s after the 0x34 final response lost the session
+ * (4.15 s erase + 1.5 s > 5 s S3), and at the 4 s/sector worst case it would
+ * expire mid-erase. Restart it on every frame this produces (each 0x78 and
+ * the final response). Runs inside the DoIP lock pair, like any dispatch. */
+static uds_server_ctx_t *sp_dfu_srv = NULL;
+
+static bool doip_pending_cb(uds_msg_buf_t *out_frame)
+{
+    bool more = uds_service_0x34_pending_tick(out_frame);
+
+    if (more && (sp_dfu_srv != NULL)) {
+        (void)uds_session_reset_s3_timer(sp_dfu_srv->cfg.session_ctx);
+    }
+    return more;
+}
+#endif
 
 static void s_on_session_change(uds_session_type_t old_sess,
                                 uds_session_type_t new_sess)
@@ -240,6 +298,12 @@ static void uds_tick_task_entry(void *p1, void *p2, void *p3)
             (void)uds_server_tick_1ms(srv);
             (void)uds_periodic_tick_1ms();
         }
+        /* [EDS#434] 0x11 only records the reset; nothing in EDS's DoIP path
+         * performs it, so ECUReset answered 51 xx and the ECU kept running
+         * (and a firmware update never reached MCUboot). Taken here, under
+         * the locks that dispatch sets it under. */
+        uint8_t reset_type = srv->pending_reset_type;
+        srv->pending_reset_type = 0U;
         (void)diag_mutex_unlock(&s_security_lock);
         (void)diag_mutex_unlock(&s_session_lock);
 
@@ -258,6 +322,16 @@ static void uds_tick_task_entry(void *p1, void *p2, void *p3)
          * dispatch hung while holding the locks stops it (see header). */
         if ((now_ms - doip_checkin_ms) < (int64_t)DOIP_SUPERVISION_WINDOW_MS) {
             (void)diag_wdt_feed(&s_wdt);
+        }
+
+        /* [EDS#434] Same sequence as src/main.c's CAN loop: persist, let the
+         * positive response go out, reset. Runs right after a feed, and the
+         * append backend bridges its own erase, so the window holds. */
+        if (reset_type != 0U) {
+            (void)eds_platform_nvm_flush();
+            k_msleep(DIAG_RESET_TX_GRACE_MS);
+            (void)eds_platform_ecu_reset(reset_type);
+            /* Returns only for a reset type the platform does not support. */
         }
     }
 }
@@ -302,6 +376,13 @@ int main(void)
      * erase, which can block far past the 100 ms window. Must run before
      * nvm_store_init(). Same call as src/main.c. */
     nvm_store_append_set_wdt(&s_wdt);
+#endif
+
+#if defined(DIAG_SECURE_BOOT_BUILD)
+    /* [EDS#425] Same bridge for the firmware download: each chunked-erase
+     * step (one 128 KB sector, up to 4 s) and the 0x37 read-back verify.
+     * Must run before zephyr_flash_ops_init() below. */
+    zephyr_flash_ops_set_wdt(&s_wdt);
 #endif
 
     /* Same native_sim-vs-real-hardware split as src/main.c — see that
@@ -370,6 +451,45 @@ int main(void)
 
     LOG_INF("UDS stack ready: %u DIDs  %u DTCs",
             (unsigned)GEN_DID_COUNT, (unsigned)GEN_DTC_COUNT);
+
+#if defined(DIAG_SECURE_BOOT_BUILD)
+    /* [EDS#425] Firmware download over DoIP. Everything here is non-fatal,
+     * as in src/main.c: diagnostics still start, and a missing piece makes
+     * 0x34 answer 7F 34 22 instead of accepting an image. */
+    if (!boot_is_img_confirmed()) {
+        int boot_rc = boot_write_img_confirmed();
+        if (boot_rc == 0) {
+            LOG_INF("[OTA] New image confirmed — rollback guard cleared.");
+        } else {
+            LOG_ERR("[OTA] boot_write_img_confirmed() err %d — "
+                    "MCUboot will roll back on next reset.", boot_rc);
+        }
+    }
+
+    /* generated/uds_init.c is the SafeBoot-disabled variant and does not
+     * register flash ops, so this entry point does (see
+     * Zephyr-Reference-ECU#19 for the CAN one). */
+    status = zephyr_flash_ops_init();
+    if (status != UDS_STATUS_OK) {
+        LOG_ERR("[DFU] Flash ops registration failed: 0x%02X", (unsigned)status);
+    }
+
+    status = zephyr_mcuboot_image_policy_init();
+    if (status != UDS_STATUS_OK) {
+        LOG_ERR("[DFU] Image policy registration failed: 0x%02X — "
+                "0x34 RequestDownload will be refused.", (unsigned)status);
+    } else {
+        LOG_INF("[DFU] Image policy registered (SHA-256 digest verify, "
+                "boot_request_upgrade on accept). Authenticity comes "
+                "entirely from MCUboot's own RSA-2048-PSS signature check.");
+    }
+
+    /* RequestDownload erases in 128 KB steps behind 7F 34 78. Over DoIP
+     * nothing finishes them unless the server has this continuation
+     * (EDS#423), wrapped to restart S3 (EDS#435, see doip_pending_cb). */
+    sp_dfu_srv = srv;
+    eds_doip_set_pending_callback(doip_pending_cb);
+#endif
 
     if ((diag_mutex_init(&s_session_lock)  != UDS_STATUS_OK) ||
         (diag_mutex_init(&s_security_lock) != UDS_STATUS_OK)) {

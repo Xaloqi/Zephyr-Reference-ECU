@@ -102,11 +102,12 @@ option(DIAG_DOIP_ONLY_BUILD
 )
 
 # ---------------------------------------------------------------------------
-# Option: secure boot (Phase 4) — MCUboot image-policy gate on the CAN build
+# Option: secure boot (Phase 4) — MCUboot image-policy gate, CAN or DoIP
 #
 # Adds EDS's flash-ops + MCUboot image-policy sources and the boot-confirm /
-# image-policy-registration calls in src/main.c (both guarded by the
-# DIAG_SECURE_BOOT_BUILD compile definition this sets). Requires building
+# image-policy-registration calls in src/main.c or src/main_doip.c (guarded
+# by the DIAG_SECURE_BOOT_BUILD compile definition this sets). Combines with
+# DIAG_DOIP_ONLY_BUILD for firmware download over DoIP [EDS#425]. Requires building
 # and flashing MCUboot itself separately, and the MCUboot-aware partition
 # table in boards/nucleo_h753zi_secureboot.overlay — see README.md "Phase 4".
 #
@@ -280,19 +281,26 @@ else()
         ${DIAG_ROOT}/platform/zephyr/zephyr_port.c
         ${DIAG_ROOT}/platform/zephyr/zephyr_timer.c
     )
-    if(DIAG_SECURE_BOOT_BUILD)
-        target_sources(app PRIVATE
-            # Called from generated/uds_init.c (zephyr_flash_ops_init())
-            ${DIAG_ROOT}/platform/zephyr/zephyr_flash_ops.c
-            # Called from src/main.c (zephyr_mcuboot_image_policy_init())
-            ${DIAG_ROOT}/platform/zephyr/zephyr_mcuboot_image_policy.c
-            # Streaming SHA-256 + MCUboot header/TLV parser — used by the
-            # image-policy digest check above
-            ${DIAG_ROOT}/platform/uds_sha256.c
-            ${DIAG_ROOT}/platform/uds_mcuboot_image.c
-        )
-        target_compile_definitions(app PRIVATE DIAG_SECURE_BOOT_BUILD=1)
-    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# Secure boot — either transport [EDS#425]. Same sources and definition for
+# CAN and DoIP; placed after the transport sources so the CAN build's link
+# order is unchanged.
+# ---------------------------------------------------------------------------
+if(DIAG_SECURE_BOOT_BUILD)
+    target_sources(app PRIVATE
+        # src/main_doip.c registers it with zephyr_flash_ops_init(); the CAN
+        # entry point does not yet (Zephyr-Reference-ECU#19).
+        ${DIAG_ROOT}/platform/zephyr/zephyr_flash_ops.c
+        # Called from both entry points (zephyr_mcuboot_image_policy_init())
+        ${DIAG_ROOT}/platform/zephyr/zephyr_mcuboot_image_policy.c
+        # Streaming SHA-256 + MCUboot header/TLV parser — used by the
+        # image-policy digest check above
+        ${DIAG_ROOT}/platform/uds_sha256.c
+        ${DIAG_ROOT}/platform/uds_mcuboot_image.c
+    )
+    target_compile_definitions(app PRIVATE DIAG_SECURE_BOOT_BUILD=1)
 endif()
 
 # ---------------------------------------------------------------------------
