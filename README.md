@@ -265,11 +265,11 @@ EDS's flash ops also feeds the watchdog (see [below](#firmware-update-over-doip-
 The exact claim is in `src/main_doip.c`'s header; read it before relying
 on more.
 
-**ECUReset over DoIP resets.** EDS defers the reset to the integration
-layer, and its DoIP path never performs it
-([`EDS#434`](https://github.com/Xaloqi/EDS/issues/434)), so `11 01`
-answered `51 01` and the ECU kept running. `src/main_doip.c`'s tick task now
-performs it, with the same flush and 50 ms grace as the CAN build.
+**ECUReset over DoIP resets.** Before
+[`EDS#434`](https://github.com/Xaloqi/EDS/issues/434), `11 01` answered
+`51 01` and the ECU kept running, because no DoIP path performed the
+deferred reset. EDS's DoIP server now performs it through its platform
+binding (flush, 50 ms grace, reset).
 
 ### Secure boot — confirmed working, both directions
 
