@@ -119,7 +119,6 @@
 #include "uds_security_algo.h"
 #include "uds_periodic.h"
 #include "uds_session.h"
-#include "platform_api.h"   /* eds_platform_nvm_flush/_ecu_reset() */
 
 /* --------------------------------------------------------------------------
  * DoIP platform headers
@@ -185,12 +184,10 @@ LOG_MODULE_REGISTER(reference_bcm_doip, LOG_LEVEL_INF);
  * step holds the locks for one sector erase (~0.83 s measured, up to 4 s)
  * while zephyr_flash_ops.c's timer feeds the watchdog. Time beyond 1 s per
  * step is dropped, so the SecurityAccess lockout countdown runs long
- * (the safe direction), and S3 is restarted by doip_pending_cb anyway. */
+ * (the safe direction), and EDS restarts S3 on every erase-step frame
+ * (EDS#435) anyway. */
 #define DIAG_TICK_CATCHUP_MAX_MS           (1000)
 
-/* [EDS#434] Time given to doip_thread to put the 51 xx response on the wire
- * before an ECUReset is executed. The same 50 ms src/main.c gives ISO-TP. */
-#define DIAG_RESET_TX_GRACE_MS             (50)
 
 K_THREAD_STACK_DEFINE(s_tick_stack, CONFIG_DIAG_TICK_TASK_STACK_SIZE);
 static struct k_thread s_tick_thread;
@@ -228,26 +225,6 @@ static void doip_unlock_cb(void)
     (void)diag_mutex_unlock(&s_security_lock);
     (void)diag_mutex_unlock(&s_session_lock);
 }
-
-#if defined(DIAG_SECURE_BOOT_BUILD)
-/* [EDS#435] EDS restarts S3 when a request arrives, but not when a 0x78
- * request finishes, and S3 keeps counting through the chunked erase. Measured:
- * a tester pausing 1.5 s after the 0x34 final response lost the session
- * (4.15 s erase + 1.5 s > 5 s S3), and at the 4 s/sector worst case it would
- * expire mid-erase. Restart it on every frame this produces (each 0x78 and
- * the final response). Runs inside the DoIP lock pair, like any dispatch. */
-static uds_server_ctx_t *sp_dfu_srv = NULL;
-
-static bool doip_pending_cb(uds_msg_buf_t *out_frame)
-{
-    bool more = uds_service_0x34_pending_tick(out_frame);
-
-    if (more && (sp_dfu_srv != NULL)) {
-        (void)uds_session_reset_s3_timer(sp_dfu_srv->cfg.session_ctx);
-    }
-    return more;
-}
-#endif
 
 static void s_on_session_change(uds_session_type_t old_sess,
                                 uds_session_type_t new_sess)
@@ -298,12 +275,6 @@ static void uds_tick_task_entry(void *p1, void *p2, void *p3)
             (void)uds_server_tick_1ms(srv);
             (void)uds_periodic_tick_1ms();
         }
-        /* [EDS#434] 0x11 only records the reset; nothing in EDS's DoIP path
-         * performs it, so ECUReset answered 51 xx and the ECU kept running
-         * (and a firmware update never reached MCUboot). Taken here, under
-         * the locks that dispatch sets it under. */
-        uint8_t reset_type = srv->pending_reset_type;
-        srv->pending_reset_type = 0U;
         (void)diag_mutex_unlock(&s_security_lock);
         (void)diag_mutex_unlock(&s_session_lock);
 
@@ -322,16 +293,6 @@ static void uds_tick_task_entry(void *p1, void *p2, void *p3)
          * dispatch hung while holding the locks stops it (see header). */
         if ((now_ms - doip_checkin_ms) < (int64_t)DOIP_SUPERVISION_WINDOW_MS) {
             (void)diag_wdt_feed(&s_wdt);
-        }
-
-        /* [EDS#434] Same sequence as src/main.c's CAN loop: persist, let the
-         * positive response go out, reset. Runs right after a feed, and the
-         * append backend bridges its own erase, so the window holds. */
-        if (reset_type != 0U) {
-            (void)eds_platform_nvm_flush();
-            k_msleep(DIAG_RESET_TX_GRACE_MS);
-            (void)eds_platform_ecu_reset(reset_type);
-            /* Returns only for a reset type the platform does not support. */
         }
     }
 }
@@ -486,9 +447,8 @@ int main(void)
 
     /* RequestDownload erases in 128 KB steps behind 7F 34 78. Over DoIP
      * nothing finishes them unless the server has this continuation
-     * (EDS#423), wrapped to restart S3 (EDS#435, see doip_pending_cb). */
-    sp_dfu_srv = srv;
-    eds_doip_set_pending_callback(doip_pending_cb);
+     * (EDS#423). It also restarts S3 on every frame it produces (EDS#435). */
+    eds_doip_set_pending_callback(uds_service_0x34_pending_tick);
 #endif
 
     if ((diag_mutex_init(&s_session_lock)  != UDS_STATUS_OK) ||
