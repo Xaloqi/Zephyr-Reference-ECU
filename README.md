@@ -208,7 +208,9 @@ and not this ECU's own application logic *through* SOVD), are in
 
 ## DoIP and secure boot
 
-**DoIP, not combined with CAN.** `src/main_doip.c` is a separate,
+**DoIP, not combined with CAN.** (DoIP *with* secure boot is supported, see
+[below](#firmware-update-over-doip--signed-image-both-refusals-shown).)
+`src/main_doip.c` is a separate,
 alternate entry point — `CMakeLists.txt`'s `DIAG_DOIP_ONLY_BUILD` option
 selects it *instead of* `src/main.c`, never both in the same image. Xaloqi
 EDS ships no example, and no proven architecture, for running CAN and
@@ -257,8 +259,17 @@ a request dispatch hung while holding the UDS locks, or a DoIP server
 thread wedged on its socket or exited all reset the ECU. An idle server
 with no client checks in every 5 s and is not reset. A dead Ethernet link
 is not detected. Boot before `main()` (which waits 1.5–4.1 s for the network)
-is unsupervised. The exact claim is in `src/main_doip.c`'s header; read it
-before relying on more.
+is unsupervised. One exception, in the secure-boot variant only: while a
+firmware download's erase step or 0x37 read-back is running, a timer in
+EDS's flash ops also feeds the watchdog (see [below](#firmware-update-over-doip--signed-image-both-refusals-shown)).
+The exact claim is in `src/main_doip.c`'s header; read it before relying
+on more.
+
+**ECUReset over DoIP resets.** EDS defers the reset to the integration
+layer, and its DoIP path never performs it
+([`EDS#434`](https://github.com/Xaloqi/EDS/issues/434)), so `11 01`
+answered `51 01` and the ECU kept running. `src/main_doip.c`'s tick task now
+performs it, with the same flush and 50 ms grace as the CAN build.
 
 ### Secure boot — confirmed working, both directions
 
@@ -279,6 +290,40 @@ this, not building #319 first.
 
 Full key-generation, build, sign and flash procedure:
 [docs/secure-boot.md](docs/secure-boot.md).
+
+### Firmware update over DoIP — signed image, both refusals shown
+
+`-DDIAG_DOIP_ONLY_BUILD=ON -DDIAG_SECURE_BOOT_BUILD=ON` builds DoIP with
+secure boot. `scripts/doip_flash.py` runs `10 02`, `27`, `34` (the erase runs
+behind `7F 34 78`), `36` ×N, `37` with CRC-32, then `11 01`. Confirmed on a
+NUCLEO-H753ZI with real Ethernet ([EDS#425](https://github.com/Xaloqi/EDS/issues/425)):
+
+| Image (512,336 B signed) | 0x37 (EDS image policy) | MCUboot after `11 01` | Running afterwards |
+|---|---|---|---|
+| Correctly signed, v1.1.0 | `77` accepted | swapped, booted, confirmed | v1.1.0 |
+| Signed with the **wrong key**, v1.2.0 | `77` accepted | **refused**: `Image in the secondary slot is not valid!` | v1.1.0 (unchanged) |
+| Correctly signed, **one payload byte flipped**, v1.3.0 | **refused**: `7F 37 72`, digest mismatch | `Swap type: none` | v1.1.0 (unchanged) |
+
+The two refusals are different guarantees. EDS's 0x37 check is a digest
+check, so it catches corruption and naive tampering. **Authenticity comes
+only from MCUboot's signature check, at swap time.** An image with a
+recomputed digest and no valid signature passes 0x37, as the wrong-key row
+shows.
+
+- **Timing:** 500 KiB in 7.2 s (erase 3.3 s, 2010 × 0x36 at a median 1.91 ms
+  each). 2 MiB of TransferData plus 16 sector erases ran on one connection in
+  29 s, 1.6 % of the 30 min connection lifetime.
+- **Largest image: 512 KiB including header and TLVs.** MCUboot's
+  swap-using-move needs one free sector plus the trailer sector in each 6 ×
+  128 KB slot. No dual-slot layout of this part's 2 MB internal flash holds a
+  1 MB image.
+- **Watchdog:** RCC_RSR 0 and IWDG1 RLR 0x031F, sampled every 0.5 s through
+  each download. While an erase step or the 0x37 read-back runs, a timer
+  feeds the watchdog, bounded by the flash driver's 8 s timeout. MCUboot's
+  swap runs before `main()` and is unsupervised (~19 s from reset to an
+  armed IWDG). `src/main_doip.c`'s header has the exact statement.
+
+Commands and the full campaign: [docs/secure-boot.md](docs/secure-boot.md#firmware-update-over-doip).
 
 ---
 
