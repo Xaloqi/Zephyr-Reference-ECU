@@ -82,6 +82,43 @@ then MCUboot logs `Not enough free space to run swap upgrade` and keeps the
 old image ([EDS#436](https://github.com/Xaloqi/EDS/issues/436)). No dual-slot
 layout of this part's 2 MB internal flash holds a 1 MB image.
 
+### Larger images: the arithmetic, and two routes
+
+The limit comes from MCUboot's swap geometry on this part, not from EDS or
+the DoIP path. The STM32H753's 2 MB is sixteen 128 KB sectors:
+
+| Layout (sectors of 128 KB) | Per slot | Largest image under swap-using-move |
+|---|---|---|
+| This repo: MCUboot 2 + slots 6 + 6 + `diag_nvs` 2 | 768 KB | 4 sectors = **512 KiB** |
+| Stripped: MCUboot 1, no NVS, slots 7 + 7 (+1 spare) | 896 KB | 5 sectors = 640 KiB |
+
+Swap-using-move gives up one sector per slot for the move, and the trailer
+needs its own sector at the end. So the largest image is the slot minus two
+sectors. Every dual-slot layout of 2 MB of internal flash stays under 1 MB.
+`diag_nvs` can't shrink: two banks of one sector each is the minimum that
+keeps the SecurityAccess lockout counter safe across power loss (see EDS#304).
+
+An image of 1 MB or more needs one of two designs. They're different update
+architectures, not configuration changes:
+
+1. **Secondary slot in external flash** (QSPI/OSPI NOR; NUCLEO-H753ZI has
+   none). The primary slot can then take all internal flash not used by
+   MCUboot and `diag_nvs`, at most 12 sectors (1.5 MB) on this part, minus
+   what the chosen upgrade mode reserves. Rollback is kept. Check which
+   upgrade modes MCUboot supports for the external part's sector size
+   before sizing: swap-using-move expects matching sector geometry.
+2. **Single application slot** (MCUboot `SINGLE_APPLICATION_SLOT`, or
+   `BOOT_FIRMWARE_LOADER` with a small separate loader image). The
+   application gets almost all of the internal flash, but **there is no
+   previous image to revert to**: an interrupted or rejected update leaves
+   the ECU in the bootloader or loader, not on the old firmware. For an
+   ASIL-B-positioned ECU that's a safety-concept decision, not a size tweak.
+
+The download path (DoIP, image policy, watchdog bridging, S3) doesn't
+depend on the image size. Erase scales at ~0.83 s per 128 KB sector
+(≤ 4 s worst case, inside `DOIP_MAX_PENDING_MS`), and 2 MiB of
+TransferData ran on one connection in 29 s.
+
 ### Confirmed on hardware, including both refusals
 
 Each image is the application padded to 500 KiB (512,336 B signed). The
