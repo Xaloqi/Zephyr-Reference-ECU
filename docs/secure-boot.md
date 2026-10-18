@@ -77,9 +77,18 @@ image confirms itself at boot (`[OTA] New image confirmed`).
 **Largest image: 524,288 B (512 KiB) including the 1 KiB header and the
 TLVs.** MCUboot's swap-using-move (`swap_move.c`, `swap_run()`) needs the
 image to end before the sector before the trailer sector. With 6 × 128 KB
-sectors per slot that leaves 4. An image above that still passes 0x34–0x37,
-then MCUboot logs `Not enough free space to run swap upgrade` and keeps the
-old image ([EDS#436](https://github.com/Xaloqi/EDS/issues/436)). No dual-slot
+sectors per slot that leaves 4. Since EDS#479 the ECU advertises exactly
+that as its download region (boot log: `Download region: 524288 B`), so 0x34
+answers `7F 34 31` for a larger image. Before, such an image passed 0x34–0x37,
+then MCUboot logged `Not enough free space to run swap upgrade` and kept the
+old image ([EDS#436](https://github.com/Xaloqi/EDS/issues/436)).
+
+**The CAN build downloads too** (#19). Same sequence over CAN at 500 kbit/s
+(requests on 0x7DF, responses on 0x7E8): on 2026-10-18 a signed 108,740 B
+v1.1.0 image went through 0x34 (erase answered `7F 34 78`, then `74`),
+425 × 0x36 in 38 s, `37 <CRC-32>` → `77`, and `11 01`; MCUboot swapped it
+in and it confirmed itself. The TransferData block counter wraps
+0xFF → 0x00. No dual-slot
 layout of this part's 2 MB internal flash holds a 1 MB image.
 
 ### Larger images: the arithmetic, and two routes

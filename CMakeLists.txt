@@ -290,8 +290,8 @@ endif()
 # ---------------------------------------------------------------------------
 if(DIAG_SECURE_BOOT_BUILD)
     target_sources(app PRIVATE
-        # src/main_doip.c registers it with zephyr_flash_ops_init(); the CAN
-        # entry point does not yet (Zephyr-Reference-ECU#19).
+        # Registered with zephyr_flash_ops_init() by both entry points
+        # (src/main.c since #19, src/main_doip.c).
         ${DIAG_ROOT}/platform/zephyr/zephyr_flash_ops.c
         # Called from both entry points (zephyr_mcuboot_image_policy_init())
         ${DIAG_ROOT}/platform/zephyr/zephyr_mcuboot_image_policy.c
