@@ -54,6 +54,7 @@
 #if defined(DIAG_SECURE_BOOT_BUILD)
 #include "zephyr_flash_ops.h"              /* zephyr_flash_ops_set_wdt() */
 #include "zephyr_mcuboot_image_policy.h"   /* zephyr_mcuboot_image_policy_init() */
+#include "services.h"                      /* uds_service_0x34_pending_tick() */
 #include <zephyr/dfu/mcuboot.h>            /* boot_is_img_confirmed() et al. */
 #endif
 
@@ -230,6 +231,28 @@ static void diag_task_entry(void *p1, void *p2, void *p3)
             }
         }
 
+#if defined(DIAG_SECURE_BOOT_BUILD)
+        {
+            /* [#19] 0x34's chunked erase answers 7F 34 78 and finishes here,
+             * one bounded sector per tick; without this a CAN tester waits
+             * forever after the 0x78. A built frame that ISO-TP refused is
+             * retried as-is: once the final 0x74 is returned the erase is no
+             * longer active, so asking again would lose it. Adapted from
+             * EDS's examples/safeboot_ecu/src/main.c. */
+            static uds_msg_buf_t s_erase_frame;
+            static bool          s_erase_frame_pending = false;
+
+            if (!s_erase_frame_pending) {
+                s_erase_frame_pending = uds_service_0x34_pending_tick(&s_erase_frame);
+            }
+            if (s_erase_frame_pending &&
+                (isotp_transmit(tp, s_erase_frame.data,
+                                (uint32_t)s_erase_frame.length) == UDS_STATUS_OK)) {
+                s_erase_frame_pending = false;
+            }
+        }
+#endif
+
         (void)diag_wdt_feed(&s_wdt);
     }
 }
@@ -285,7 +308,7 @@ int main(void)
      * chunked erase_step_cb() can bridge the watchdog across one bounded
      * sector-erase call -- STM32H7 flash sector erase can block up to
      * ~4000 ms, far past this build's 100 ms watchdog window. Must run
-     * before uds_generated_init() below, which calls zephyr_flash_ops_init().
+     * before zephyr_flash_ops_init() further down (#19).
      * Adapted verbatim from EDS's own examples/safeboot_ecu/src/main.c. */
     zephyr_flash_ops_set_wdt(&s_wdt);
 #endif
@@ -432,6 +455,18 @@ int main(void)
      * unavailable this power cycle (same posture as a failed NVM init
      * above).
      */
+    /*
+     * [#19] Register the MCUboot secondary-slot flash ops. This repo's
+     * generated/uds_init.c is the SafeBoot-disabled variant and does not
+     * call it, so without this every 0x34 answered 7F 34 22. Done here, not
+     * in generated/. Non-fatal, same posture as the image policy below.
+     */
+    status = zephyr_flash_ops_init();
+    if (status != UDS_STATUS_OK) {
+        LOG_ERR("[DFU] Flash ops init failed: 0x%02X — "
+                "0x34 RequestDownload will be refused.", (unsigned)status);
+    }
+
     status = zephyr_mcuboot_image_policy_init();
     if (status != UDS_STATUS_OK) {
         LOG_ERR("[DFU] Image policy registration failed: 0x%02X — "
