@@ -34,7 +34,9 @@
  * TARGET:  native_sim (loopback only — see boards/native_sim_doip.conf)
  *          and nucleo_h753zi (real Ethernet — see
  *          boards/nucleo_h753zi_doip.conf and README.md "Phase 4" for the
- *          JP6/JP7 jumper and host static-IP setup it requires).
+ *          JP6/JP7 jumper and host static-IP setup it requires),
+ *          and xenvm (a Xen guest, SoDeV's DomZ, over virtio-net — see
+ *          boards/xenvm_doip.conf and xenvm/README.md).
  *
  * THREAD MODEL:
  *   main()        — init -> uds_generated_init -> start tick + DoIP -> return
@@ -161,6 +163,24 @@
 #include <zephyr/storage/flash_map.h>
 
 LOG_MODULE_REGISTER(reference_bcm_doip, LOG_LEVEL_INF);
+
+#if defined(DIAG_ENTROPY_SEEDS)
+#include <zephyr/drivers/entropy.h>
+
+/* SecurityAccess seeds from the board's zephyr,entropy device (virtio-rng on
+ * xenvm), the pattern of EDS's examples/ardep_ecu. Opt-in through CMake's
+ * DIAG_ENTROPY_SEEDS so the other boards' images are unchanged. Without it,
+ * EDS uses its LFSR fallback and every boot repeats the same seed sequence. */
+static const struct device *const s_entropy_dev =
+    DEVICE_DT_GET(DT_CHOSEN(zephyr_entropy));
+
+static uds_status_t s_trng_cb(uint8_t *buf, uint8_t len)
+{
+    int rc = entropy_get_entropy(s_entropy_dev, buf, (uint16_t)len);
+
+    return (rc == 0) ? UDS_STATUS_OK : UDS_STATUS_ERR_PLATFORM;
+}
+#endif /* DIAG_ENTROPY_SEEDS */
 
 /* =============================================================================
  * DoIP ECU configuration — standard xaloqi-tester defaults, same values
@@ -311,7 +331,21 @@ int main(void)
             (unsigned)DOIP_ECU_LOGICAL_ADDR, (unsigned)DOIP_PORT);
 
     LOG_WRN("[SEC] Using placeholder AES keys — inject OEM keys before production.");
+#if defined(DIAG_ENTROPY_SEEDS)
+    if (device_is_ready(s_entropy_dev)) {
+        (void)uds_security_algo_set_rng_cb(s_trng_cb);
+        LOG_INF("[SEC] SecurityAccess seeds from entropy device %s",
+                s_entropy_dev->name);
+    } else {
+        /* Fail closed: an entropy build that silently fell back to the
+         * LFSR would repeat its seeds on every boot. */
+        LOG_ERR("[SEC] Entropy device %s not ready — refusing to start.",
+                s_entropy_dev->name);
+        return -1;
+    }
+#else
     (void)uds_security_algo_set_rng_cb(NULL);
+#endif
 
     /*
      * Arm the watchdog here, explicitly — Zephyr's boot-time arming is off

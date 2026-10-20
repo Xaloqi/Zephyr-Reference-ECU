@@ -1,0 +1,33 @@
+# West manifest for the xenvm (Xen guest) variant ONLY.
+#
+# The NUCLEO build stays on Zephyr v3.7.0 (../west.yml). This variant needs
+# Zephyr v4.4.1, the exact SHA SoDeV's DomZ pins, and SDK 1.0.1. Nothing from
+# Zephyr's own west.yml is imported: the xenvm board needs no HAL module.
+#
+#   west init -l --mf xenvm/west.yml .   (from a directory holding this repo)
+#   west update
+#
+# xenvm/run.sh does this inside its container; you do not need west on the host.
+manifest:
+  version: "0.13"
+
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: xaloqi
+      url-base: https://github.com/Xaloqi
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: 1f6485eca25431b5ff27ce9a754218c9e559bbbb   # v4.4.1
+      path: zephyr
+      west-commands: scripts/west-commands.yml   # west build, without importing modules
+
+    - name: EDS
+      remote: xaloqi
+      revision: 2b47faf41eba268c0d149ec14170275e663ce4cc   # main with EDS#499/#500
+      path: modules/xaloqi-eds
+
+  self:
+    path: Zephyr-Reference-ECU
