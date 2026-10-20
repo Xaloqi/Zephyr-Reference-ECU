@@ -1,0 +1,74 @@
+/*
+ * Xaloqi Zephyr-Reference-ECU — boards/xenvm_doip.overlay
+ *
+ * The two virtio-mmio slots libxl allocates on Arm for the first two virtio=
+ * entries of xenvm/harness/domz.cfg, in that order:
+ *   slot 0  0x02000000, SPI 33 (GIC_SPI 1)  virtio-net
+ *   slot 1  0x02000200, SPI 34 (GIC_SPI 2)  virtio-rng (zephyr,entropy)
+ * Zephyr's xenvm uses a static devicetree, so the nodes libxl writes into the
+ * guest DTB are ignored and are mirrored here. Change one, change both.
+ *
+ * Plus a RAM-backed simulated flash holding the eds_nvs_slot partition that
+ * src/main_doip.c's NVM store mounts (xenvm has no flash device).
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include <zephyr/dt-bindings/interrupt-controller/arm-gic.h>
+
+/ {
+	chosen {
+		zephyr,entropy = &virtio_rng;
+	};
+
+	virtio_mmio0: virtio_mmio@2000000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x02000000 0x0 0x200>;
+		interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+		interrupt-parent = <&gic>;
+		status = "okay";
+
+		virtio_net: virtio-net {
+			compatible = "virtio,net";
+			status = "okay";
+			local-mac-address = [00 16 3e 5a 00 01];
+		};
+	};
+
+	virtio_mmio1: virtio_mmio@2000200 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x02000200 0x0 0x200>;
+		interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+		interrupt-parent = <&gic>;
+		status = "okay";
+
+		virtio_rng: virtio-rng {
+			compatible = "virtio,device4";
+			status = "okay";
+		};
+	};
+
+	sim_flash: sim_flash {
+		compatible = "zephyr,sim-flash";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		erase-value = <0xff>;
+
+		flash_sim0: flash_sim@0 {
+			compatible = "soc-nv-flash";
+			reg = <0x00000000 DT_SIZE_K(64)>;
+			erase-block-size = <4096>;
+			write-block-size = <4>;
+
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				eds_nvs_slot: partition@0 {
+					label = "diag_nvs";
+					reg = <0x00000000 DT_SIZE_K(32)>;
+				};
+			};
+		};
+	};
+};

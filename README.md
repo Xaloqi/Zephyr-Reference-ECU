@@ -327,6 +327,20 @@ Commands and the full campaign: [docs/secure-boot.md](docs/secure-boot.md#firmwa
 
 ---
 
+## As a Xen guest: AGL SoDeV's DomZ, over DoIP
+
+`xenvm/run.sh` builds Xen 4.22, two Linux domains, QEMU and this ECU (DoIP build,
+Zephyr 4.4.1 `xenvm`), all in a container, and boots them under QEMU. A dom0less driver
+domain (DomD) creates DomZ from SoDeV's `domz.cfg`, backs its virtio-net and
+virtio-rng, and runs a DoIP tester against it. The script needs Docker only and ends
+in PASS or FAIL. The NUCLEO builds above stay on Zephyr v3.7.0; this variant has its
+own manifest, [xenvm/west.yml](xenvm/west.yml).
+
+What it proves and what it leaves out (no grant isolation, entropy from the backend
+domain, no watchdog, no canaries, placeholder keys): [xenvm/README.md](xenvm/README.md).
+
+---
+
 ## What CI does and does not prove
 
 Three independent jobs (`.github/workflows/ci.yml`):
