@@ -17,7 +17,7 @@ manifest:
 
     - name: EDS
       remote: xaloqi
-      revision: main
+      revision: v1.23.0
       path: modules/xaloqi-eds
 
   self:
