@@ -117,10 +117,10 @@ Prices are on the product pages.
 
 | You want to... | You need |
 |---|---|
-| Change a DID, DTC or routine and regenerate the C | An EDS commercial licence (the codegen templates). See [EDS](https://xaloqi.com/eds.html). |
-| Run full TestLab campaigns over DoIP against DomZ | TestLab Pro (`xaloqi-tester-pro`). See [TestLab](https://xaloqi.com/testlab.html). The stdlib probe in this directory ([`harness/doip_probe.py`](harness/doip_probe.py)) is the free substitute: it checks the handful of exchanges above, not a campaign. |
+| Change a DID, DTC or routine and regenerate the C | An EDS commercial licence (the codegen templates). See [EDS](https://xaloqi.com/eds). |
+| Run full TestLab campaigns over DoIP against DomZ | TestLab Pro (`xaloqi-tester-pro`). See [TestLab](https://xaloqi.com/testlab). The stdlib probe in this directory ([`harness/doip_probe.py`](harness/doip_probe.py)) is the free substitute: it checks the handful of exchanges above, not a campaign. |
 | Ship DomZ firmware closed-source | An EDS commercial licence. EDS is GPL-2.0 otherwise. |
-| Safety evidence for an ASIL domain | EDS Professional ships ISO 26262 work products for EDS. See [Safety](https://xaloqi.com/safety.html). |
+| Safety evidence for an ASIL domain | EDS Professional ships ISO 26262 work products for EDS. See [Safety](https://xaloqi.com/safety). |
 
 **This xenvm configuration is not a safety configuration.** The work products cover
 EDS; they do not make this build qualified or certified, and nothing here claims that.
