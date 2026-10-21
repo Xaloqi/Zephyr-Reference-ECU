@@ -8,7 +8,7 @@
 # status matches. Needs Docker and nothing else on the host (no sudo).
 #
 #   xenvm/run.sh          build what is missing, boot, check
-#   xenvm/run.sh boot     boot and check only (artifacts must exist)
+#   xenvm/run.sh boot     boot and check only (artifacts must exist and match the pins)
 #   xenvm/run.sh clean    delete the build directory
 #
 # XENVM_BUILD_DIR overrides the build directory (default: xenvm/build).
@@ -49,6 +49,15 @@ fi
 if [ "$MODE" = all ]; then
   in_container /src/xenvm/scripts/build.sh || { echo "FAIL: build failed (logs: $BUILD/log-*.txt)"; exit 1; }
 fi
+# The DomZ image must have been built from the commits pinned now. `boot` reuses
+# whatever is in the build dir, so without this a pin change passes on the old image.
+STAMP_FILE="$BUILD/out/zephyr-domz.stamp"
+WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV"
+HAVE=$(cat "$STAMP_FILE" 2>/dev/null || echo "none (no stamp: image built before stamping, or missing)")
+if [ "$HAVE" != "$WANT" ]; then
+  echo "FAIL: DomZ image was built from [$HAVE], pins are [$WANT]; run xenvm/run.sh (not boot) to rebuild"
+  exit 1
+fi
 in_container /src/xenvm/scripts/boot.sh || { echo "FAIL: boot script failed"; exit 1; }
 cp "$BUILD/run/serial.log" "$BUILD/serial.log"
 
@@ -56,5 +65,5 @@ T1=$(date +%s)
 echo "[run] wall-clock $(( (T1 - T0) / 60 )) min $(( (T1 - T0) % 60 )) s; build dir $(du -sh "$BUILD" | cut -f1); full log $BUILD/serial.log"
 set +e
 docker run --rm -v "$REPO":/src:ro -v "$BUILD":/build "$IMAGE" \
-  python3 /src/xenvm/scripts/check.py /build/serial.log
+  python3 /src/xenvm/scripts/check.py /build/serial.log "$HAVE"
 exit $?
