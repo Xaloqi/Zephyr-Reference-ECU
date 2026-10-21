@@ -115,6 +115,14 @@ if [ ! -f $B/rootfs/.done ]; then
 fi
 
 # --- Zephyr: ReferenceBCM (DoIP) for xenvm, Zephyr v4.4.1 --------------------
+# The image is stamped with the commits it was built from (run.sh checks the stamp
+# before every boot). An image whose stamp disagrees with the pins is rebuilt.
+STAMP=$OUT/zephyr-domz.stamp
+WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV"
+if [ -f $OUT/zephyr-domz.bin ] && [ "$(cat $STAMP 2>/dev/null)" != "$WANT" ]; then
+  log "DomZ image is stale or unstamped (stamp: $(cat $STAMP 2>/dev/null || echo none)); rebuilding from the pins"
+  rm -f $OUT/zephyr-domz.bin $STAMP; rm -rf $B/ws
+fi
 if [ ! -f $OUT/zephyr-domz.bin ]; then
   log "west workspace from xenvm/west.yml"
   WS=$B/ws
@@ -153,5 +161,7 @@ if [ ! -f $OUT/zephyr-domz.bin ]; then
   done
   grep -iE "warning:" $B/log-zephyr.txt | sort -u | head -20 || true
   cp $B/obj-zephyr/zephyr/zephyr.bin $OUT/zephyr-domz.bin
+  # Stamp from the checkouts that were actually compiled, not from versions.env.
+  echo "zephyr=$(git -C $WS/zephyr rev-parse HEAD) eds=$(git -C $WS/modules/xaloqi-eds rev-parse HEAD)" > $STAMP
 fi
 log "artifacts:"; ls -l $OUT

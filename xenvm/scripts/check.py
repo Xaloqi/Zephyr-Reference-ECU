@@ -67,6 +67,8 @@ def main():
     b = boots(lines)
     print("=" * 72)
     print("Evidence from DomD (domid 1, dom0less, capabilities = <1>)")
+    if len(sys.argv) > 2:
+        print("  DomZ image built from  : " + sys.argv[2])
     for l in lines:
         if l.startswith(("xen_version", "Name ", "Domain-0", "DomD ", "virtio = ", "           \"backend")):
             print("  " + l)
