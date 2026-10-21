@@ -76,7 +76,7 @@ of cpus`, `getting physinfo: Operation not permitted`, and no DomZ.
 | Console | xenconsoled in DomD, `/tool/xenconsoled/domid = 1` | the same, plus a console seeder their Zephyr xenstore needs |
 | DomZ | SoDeV's `domz.cfg` ([`harness/domz.cfg`](harness/domz.cfg), only the kernel path changed) + `virtio=` | `virtio = []`, no device model |
 | Zephyr | **v4.4.1 `1f6485ec`**, SDK 1.0.1, board `xenvm` (GICv2) | the same SHA |
-| EDS | `2b47faf` (main, with EDS#499/#500) | not present |
+| EDS | `4befaac` (main, with EDS#499/#500/#502) | not present |
 | Machine | QEMU 10.0 `virt`, cortex-a57, 4 CPUs, 4 GiB, TCG | Raspberry Pi 5 / 4 (Cortex-A76 / A72, GIC-400) |
 
 ## Honest gaps
@@ -106,6 +106,26 @@ of cpus`, `getting physinfo: Operation not permitted`, and no DomZ.
   SHA or SHA-256.
 - `xl destroy` reports `unable to remove device` for the virtio devices. Nothing in DomD runs
   the backend half of the device teardown handshake (on SoDeV that is `xl devd`). DomZ is destroyed anyway.
+
+## Going further
+
+This demo, and everything it runs, is free. Each natural next step crosses a licence
+boundary. The boundaries are the ones in the main README's
+[Tiers table](../README.md#tiers--what-is-free-and-what-is-not) and in
+[`COMMERCIAL_NOTICE.md`](../COMMERCIAL_NOTICE.md); they are not repeated here.
+Prices are on the product pages.
+
+| You want to... | You need |
+|---|---|
+| Change a DID, DTC or routine and regenerate the C | An EDS commercial licence (the codegen templates). See [EDS](https://xaloqi.com/eds.html). |
+| Run full TestLab campaigns over DoIP against DomZ | TestLab Pro (`xaloqi-tester-pro`). See [TestLab](https://xaloqi.com/testlab.html). The stdlib probe in this directory ([`harness/doip_probe.py`](harness/doip_probe.py)) is the free substitute: it checks the handful of exchanges above, not a campaign. |
+| Ship DomZ firmware closed-source | An EDS commercial licence. EDS is GPL-2.0 otherwise. |
+| Safety evidence for an ASIL domain | EDS Professional ships ISO 26262 work products for EDS. See [Safety](https://xaloqi.com/safety.html). |
+
+**This xenvm configuration is not a safety configuration.** The work products cover
+EDS; they do not make this build qualified or certified, and nothing here claims that.
+See [Honest gaps](#honest-gaps): no grant isolation, entropy from DomD, no stack
+canaries, no watchdog, placeholder keys.
 
 ## Files
 
