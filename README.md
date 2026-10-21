@@ -338,6 +338,7 @@ own manifest, [xenvm/west.yml](xenvm/west.yml).
 
 What it proves and what it leaves out (no grant isolation, entropy from the backend
 domain, no watchdog, no canaries, placeholder keys): [xenvm/README.md](xenvm/README.md).
+What each next step needs (licence, TestLab Pro, safety work products): [Going further](xenvm/README.md#going-further).
 
 ---
 
