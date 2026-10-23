@@ -1,0 +1,75 @@
+/*
+ * Xaloqi Zephyr-Reference-ECU — boards/xenvm_can.overlay
+ *
+ * SPIKE (virtio-can frontend, not merged). The CAN variant of xenvm_doip:
+ * the two virtio-mmio slots libxl allocates on Arm for the virtio= entries of
+ * the spike's domz-can.cfg, in that order:
+ *   slot 0  0x02000000, SPI 33 (GIC_SPI 1)  virtio-can (can0), device 36
+ *   slot 1  0x02000200, SPI 34 (GIC_SPI 2)  virtio-rng (zephyr,entropy)
+ * virtio,device24 needs the out-of-tree can_virtio driver module.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include <zephyr/dt-bindings/interrupt-controller/arm-gic.h>
+
+/ {
+	aliases {
+		can0 = &virtio_can;
+	};
+
+	chosen {
+		zephyr,canbus = &virtio_can;
+		zephyr,entropy = &virtio_rng;
+	};
+
+	virtio_mmio0: virtio_mmio@2000000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x02000000 0x0 0x200>;
+		interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+		interrupt-parent = <&gic>;
+		status = "okay";
+
+		virtio_can: virtio-can {
+			compatible = "virtio,device24";
+			status = "okay";
+		};
+	};
+
+	virtio_mmio1: virtio_mmio@2000200 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x02000200 0x0 0x200>;
+		interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+		interrupt-parent = <&gic>;
+		status = "okay";
+
+		virtio_rng: virtio-rng {
+			compatible = "virtio,device4";
+			status = "okay";
+		};
+	};
+
+	sim_flash: sim_flash {
+		compatible = "zephyr,sim-flash";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		erase-value = <0xff>;
+
+		flash_sim0: flash_sim@0 {
+			compatible = "soc-nv-flash";
+			reg = <0x00000000 DT_SIZE_K(64)>;
+			erase-block-size = <4096>;
+			write-block-size = <4>;
+
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				eds_nvs_slot: partition@0 {
+					label = "diag_nvs";
+					reg = <0x00000000 DT_SIZE_K(32)>;
+				};
+			};
+		};
+	};
+};
