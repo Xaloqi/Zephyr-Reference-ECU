@@ -7,7 +7,8 @@
 #   rust-vmm vhost-device-can/-rng + Linaro xen-vhost-frontend (pinned, patched),
 #   Linux 7.2.12 for the reference guest, the Zephyr images built with the driver.
 #
-#   VIRTIO_CAN_MODULE=/path/to/zephyr-virtio-can xenvm/can-spike/run-spike.sh [build|q1|qa|q2|q3|q3-stress|all]
+#   xenvm/can-spike/run-spike.sh [build|q1|qa|q2|q3|q3-stress|all]
+#   (the driver is Xaloqi/zephyr-virtio-can at VIRTIO_CAN_REV; VIRTIO_CAN_MODULE=<dir> uses a local checkout)
 #
 # Prerequisite: xenvm/run.sh has built the base harness (Xen, Linux, QEMU, rootfs, ws)
 # from THIS branch (its linux.config adds CAN, vcan, XEN_VIRTIO, XEN_PRIVCMD_EVENTFD).
@@ -16,9 +17,13 @@ HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/../.." && pwd)
 BUILD=$(cd "${XENVM_BUILD_DIR:-$HERE/../build}" && pwd)
 source "$HERE/versions.env"
 IMAGE=xaloqi-zre-xenvm-builder:1
-MOD=${VIRTIO_CAN_MODULE:?set VIRTIO_CAN_MODULE to the zephyr-virtio-can module directory}
-MOD=$(cd "$MOD" && pwd)
 W=$BUILD/can-spike; mkdir -p $W
+if [ -z "${VIRTIO_CAN_MODULE:-}" ]; then   # the pinned driver, unless a local checkout is given
+  VIRTIO_CAN_MODULE=$W/zephyr-virtio-can
+  [ -d $VIRTIO_CAN_MODULE/.git ] || git clone -q "$VIRTIO_CAN_URL" $VIRTIO_CAN_MODULE
+  git -C $VIRTIO_CAN_MODULE fetch -q origin "$VIRTIO_CAN_REV" && git -C $VIRTIO_CAN_MODULE checkout -q "$VIRTIO_CAN_REV"
+fi
+MOD=$(cd "$VIRTIO_CAN_MODULE" && pwd)
 U="$(id -u):$(id -g)"
 c() { docker run --rm -v "$REPO":/src:ro -v "$BUILD":/build -v "$MOD":/module:ro -e GUEST_INIT -e XENVM_BOOT_TIMEOUT \
         "$IMAGE" bash -c "$1; rc=\$?; chown -R $U /build; exit \$rc"; }

@@ -22,8 +22,7 @@ QEMU virt (arm64, TCG)
 
 ```sh
 xenvm/run.sh                                     # base harness, from this branch
-VIRTIO_CAN_MODULE=/path/to/zephyr-virtio-can \
-  xenvm/can-spike/run-spike.sh all               # build, then Q1, Q2, Q3; each prints PASS/FAIL
+xenvm/can-spike/run-spike.sh all                 # build, then Q1, Q2, Q3; each prints PASS/FAIL
 ```
 
 You can also run the stages one at a time:
@@ -37,8 +36,8 @@ You can also run the stages one at a time:
 | `q3` | ReferenceBCM (EDS) in DomZ. The tester sends 3E 00, 10 03, 22 F190 (multi-frame) and 27 01 ×2. Two boots must give different seeds. The third boot is a canary: the backend sits on another vcan, so the tester must get nothing |
 | `q3-stress` | 5 boots × 3 rounds, plus the canary |
 
-The driver is not in this repository. Its licence and home are a founder decision that is
-still open.
+The driver is [Xaloqi/zephyr-virtio-can](https://github.com/Xaloqi/zephyr-virtio-can) (Apache-2.0),
+pinned in `versions.env`. Set `VIRTIO_CAN_MODULE=<dir>` to use a local checkout instead.
 
 ## What this branch changes outside this directory
 
