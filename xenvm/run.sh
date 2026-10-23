@@ -52,10 +52,12 @@ fi
 # The DomZ image must have been built from the commits pinned now. `boot` reuses
 # whatever is in the build dir, so without this a pin change passes on the old image.
 STAMP_FILE="$BUILD/out/zephyr-domz.stamp"
-WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV"
+# Same computation as app_hash in scripts/build.sh.
+APP=$(cd "$REPO" && cat prj.conf CMakeLists.txt boards/xenvm_doip.conf boards/xenvm_doip.overlay src/*.c src/*.h | sha256sum | cut -c1-16)
+WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV app=$APP"
 HAVE=$(cat "$STAMP_FILE" 2>/dev/null || echo "none (no stamp: image built before stamping, or missing)")
 if [ "$HAVE" != "$WANT" ]; then
-  echo "FAIL: DomZ image was built from [$HAVE], pins are [$WANT]; run xenvm/run.sh (not boot) to rebuild"
+  echo "FAIL: DomZ image was built from [$HAVE], pins and sources are [$WANT]; run xenvm/run.sh (not boot) to rebuild"
   exit 1
 fi
 in_container /src/xenvm/scripts/boot.sh || { echo "FAIL: boot script failed"; exit 1; }
