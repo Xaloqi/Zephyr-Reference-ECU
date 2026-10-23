@@ -1,0 +1,18 @@
+mathieupoirier/xen-sys 8a234c94: XEN_DOMCTL_INTERFACE_VERSION 0x18 (Xen 4.22). With
+0x16, Xen 4.22 refuses getdomaininfo. The getdomaininfo layout is unchanged up to the
+trailing arch fields (checked against 4.22's domctl.h). Upstream, as a cargo feature:
+mathieupoirier/xen-sys#2 https://github.com/mathieupoirier/xen-sys/pull/2
+
+diff --git a/crates/xen-ioctls/src/domctl/types.rs b/crates/xen-ioctls/src/domctl/types.rs
+index 7097e07..934798f 100644
+--- a/crates/xen-ioctls/src/domctl/types.rs
++++ b/crates/xen-ioctls/src/domctl/types.rs
+@@ -16,7 +16,7 @@ use crate::aarch64::types::*;
+ #[cfg(target_arch = "x86_64")]
+ use crate::x86_64::types::*;
+ 
+-pub const XEN_DOMCTL_INTERFACE_VERSION: u32 = 0x16;
++pub const XEN_DOMCTL_INTERFACE_VERSION: u32 = 0x18; // Xen 4.22
+ 
+ pub const XEN_DOMINF_dying: u32 = 0b1;
+ pub const XEN_DOMINF_hvm_guest: u32 = 0b10;

@@ -6,22 +6,35 @@
 #   DomD  dom0less, capabilities = <1> (CONTROL)  (initramfs: rootfs + xl, QEMU DM,
 #         DomZ image, domz.cfg, tester)
 # DomD then creates DomZ (EDS) itself. The serial log is $RUN/serial.log.
+#   boot.sh [doip|can]   doip: $RUN=/build/run, DomZ on virtio-net served by QEMU
+#                        can:  $RUN=/build/run-can, DomZ on virtio-can served by
+#                              vhost-device-can + xen-vhost-frontend
 set -euo pipefail
 B=/build; OUT=$B/out; H=/src/xenvm/harness
-RUN=$B/run; T=${XENVM_BOOT_TIMEOUT:-900}
+VARIANT=${1:-doip}
+RUN=$B/run; [ $VARIANT = can ] && RUN=$B/run-can
+T=${XENVM_BOOT_TIMEOUT:-900}
 rm -rf $RUN; mkdir -p $RUN
 
-initrd() { # <name> <init> <payload files...>
+initrd() { # <name> <init> <payload files...>; <src>:<name> installs src as /root/<name>
   local name=$1 init=$2; shift 2
-  local d=$RUN/$name.root
+  local d=$RUN/$name.root f
   cp -a $B/rootfs $d
   cp $init $d/init; chmod 755 $d/init
-  mkdir -p $d/root; cp "$@" $d/root/
+  mkdir -p $d/root
+  for f in "$@"; do cp ${f%%:*} $d/root/$(basename ${f#*:}); done
   (cd $d && find . | cpio -o -H newc -R 0:0 --quiet | gzip -1 > $RUN/$name.cpio.gz)
   rm -rf $d
 }
 initrd dom0 $H/dom0-init.sh $OUT/xs-seed-port
-initrd domd $H/domd-init.sh $H/domd-test.sh $H/doip_probe.py $H/domz.cfg $OUT/qemu-dm $OUT/zephyr-domz.bin
+if [ $VARIANT = can ]; then
+  echo "BOOTS=${XENVM_CAN_BOOTS:-2}" > $RUN/can.env
+  initrd domd $H/domd-init.sh $H/domd-test-can.sh:domd-test.sh $H/isotp_probe.py $H/can_dump.py \
+    $H/xs-sock-relay.py $H/domz.cfg $RUN/can.env $OUT/can/vhost-device-can $OUT/can/vhost-device-rng \
+    $OUT/can/xen-vhost-frontend $OUT/zephyr-domz-can.bin:zephyr-domz.bin
+else
+  initrd domd $H/domd-init.sh $H/domd-test.sh $H/doip_probe.py $H/domz.cfg $OUT/qemu-dm $OUT/zephyr-domz.bin
+fi
 
 QOPTS="-machine virt,virtualization=on,gic-version=2 -cpu cortex-a57 -m 4096 -smp 4 -display none -nic none"
 D=$RUN/host.dtb

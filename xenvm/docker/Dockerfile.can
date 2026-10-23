@@ -1,0 +1,16 @@
+# Builder for `xenvm/run.sh can`: the xenvm builder image plus a Rust toolchain
+# for DomD's backends (rust-vmm vhost-device, Linaro xen-vhost-frontend).
+# The toolchain is copied out of the official Rust image pinned by digest in
+# ../versions.env, so it is exactly that rustc; only the aarch64 standard
+# library is added. The DoIP builder image underneath is unchanged.
+# SPDX-License-Identifier: Apache-2.0
+ARG BUILDER
+ARG RUST_IMAGE
+FROM ${RUST_IMAGE} AS rust
+FROM ${BUILDER}
+COPY --from=rust /usr/local/rustup /usr/local/rustup
+COPY --from=rust /usr/local/cargo /usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup PATH=/usr/local/cargo/bin:${PATH}
+ARG RUST_TOOLCHAIN
+RUN rustup target add --toolchain ${RUST_TOOLCHAIN} aarch64-unknown-linux-gnu && \
+    rustc --version | grep -q "^rustc ${RUST_TOOLCHAIN} " && rustc --version
