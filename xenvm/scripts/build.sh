@@ -117,11 +117,16 @@ fi
 # --- Zephyr: ReferenceBCM (DoIP) for xenvm, Zephyr v4.4.1 --------------------
 # The image is stamped with the commits it was built from (run.sh checks the stamp
 # before every boot). An image whose stamp disagrees with the pins is rebuilt.
+# The stamp covers the pinned commits and the app's own inputs (app_hash, the same
+# computation as in run.sh), so a conf or source change cannot pass on an old image.
 STAMP=$OUT/zephyr-domz.stamp
-WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV"
+app_hash() { (cd /src && cat prj.conf CMakeLists.txt boards/xenvm_doip.conf boards/xenvm_doip.overlay src/*.c src/*.h | sha256sum | cut -c1-16); }
+PINS="zephyr=$ZEPHYR_REV eds=$EDS_REV"
+WANT="$PINS app=$(app_hash)"
 if [ -f $OUT/zephyr-domz.bin ] && [ "$(cat $STAMP 2>/dev/null)" != "$WANT" ]; then
-  log "DomZ image is stale or unstamped (stamp: $(cat $STAMP 2>/dev/null || echo none)); rebuilding from the pins"
-  rm -f $OUT/zephyr-domz.bin $STAMP; rm -rf $B/ws
+  log "DomZ image is stale or unstamped (stamp: $(cat $STAMP 2>/dev/null || echo none)); rebuilding"
+  case "$(cat $STAMP 2>/dev/null)" in "$PINS "*) ;; *) rm -rf $B/ws ;; esac
+  rm -f $OUT/zephyr-domz.bin $STAMP
 fi
 if [ ! -f $OUT/zephyr-domz.bin ]; then
   log "west workspace from xenvm/west.yml"
@@ -162,6 +167,6 @@ if [ ! -f $OUT/zephyr-domz.bin ]; then
   grep -iE "warning:" $B/log-zephyr.txt | sort -u | head -20 || true
   cp $B/obj-zephyr/zephyr/zephyr.bin $OUT/zephyr-domz.bin
   # Stamp from the checkouts that were actually compiled, not from versions.env.
-  echo "zephyr=$(git -C $WS/zephyr rev-parse HEAD) eds=$(git -C $WS/modules/xaloqi-eds rev-parse HEAD)" > $STAMP
+  echo "zephyr=$(git -C $WS/zephyr rev-parse HEAD) eds=$(git -C $WS/modules/xaloqi-eds rev-parse HEAD) app=$(app_hash)" > $STAMP
 fi
 log "artifacts:"; ls -l $OUT

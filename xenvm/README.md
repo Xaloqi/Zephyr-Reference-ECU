@@ -81,6 +81,7 @@ of cpus`, `getting physinfo: Operation not permitted`, and no DomZ.
 
 ## Honest gaps
 
+- **An intermittent DomZ fault, open ([ZRE#34](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/34)).** About 1 run in 10 (more when the host is busy), DomZ halts with `Stack overflow` on its first DoIP exchange, and that run ends in FAIL. The stack sentinel that trips is always the base of the stack placed just above another one. Making the stack bigger only moves the fault to the next thread, so this is not fixed by sizing. If you see it, run `xenvm/run.sh boot` again.
 - **No grant isolation.** Zephyr has no grant-DMA (Xen virtio-grant) support, so
   DomZ runs with `grant_usage=0`. The backend domain can read and write all of DomZ's
   RAM, and DomD is a control domain that could do far more besides. `grant_usage=1`
