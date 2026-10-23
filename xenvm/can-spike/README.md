@@ -1,5 +1,10 @@
 # xenvm/can-spike: virtio-can frontend spike (not merged)
 
+> **Superseded by `xenvm/run.sh can` ([ZRE#37](https://github.com/Xaloqi/Zephyr-Reference-ECU/pull/37)).**
+> This branch is kept as the spike's record (Q1 Linux 7.2 guest, option a, the driver self-test).
+> It stalls under host load: vhost-device-can loses RX buffers (rust-vmm/vhost-device#923), and
+> the frontend shares ioreqs with privcmd's ioeventfd. Both are fixed only in `run.sh can`.
+
 **Spike branch, not a product.** This directory answers one question for AGL SoDeV's CAN
 architecture (A): can a Zephyr DomU (DomZ) reach a CAN bus that a driver domain (DomD) owns,
 through virtio-can, using upstream pieces? EDS, running in DomZ, answers UDS over ISO-TP from
