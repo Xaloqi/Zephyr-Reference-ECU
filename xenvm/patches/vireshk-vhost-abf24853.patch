@@ -1,0 +1,57 @@
+vireshk/vhost abf24853 (frontend/stable, the commit xen-vhost-frontend's Cargo.lock
+pins): virtio-can (36, 3 queues) and virtio-rng (1 queue) in the vhost-user-frontend
+device table. Upstream: vireshk/vhost#37 https://github.com/vireshk/vhost/pull/37
+
+diff --git a/crates/vhost-user-frontend/src/lib.rs b/crates/vhost-user-frontend/src/lib.rs
+index dc4d408..f58704d 100644
+--- a/crates/vhost-user-frontend/src/lib.rs
++++ b/crates/vhost-user-frontend/src/lib.rs
+@@ -94,6 +94,7 @@ pub enum VirtioDeviceType {
+     Pmem = 27,
+     I2c = 34,
+     Watchdog = 35, // Temporary until official number allocated
++    Can = 36,
+     Gpio = 41,
+     Unknown = 0xFF,
+ }
+@@ -116,6 +117,7 @@ impl From<u32> for VirtioDeviceType {
+             27 => VirtioDeviceType::Pmem,
+             34 => VirtioDeviceType::I2c,
+             35 => VirtioDeviceType::Watchdog,
++            36 => VirtioDeviceType::Can,
+             41 => VirtioDeviceType::Gpio,
+             _ => VirtioDeviceType::Unknown,
+         }
+@@ -140,6 +142,7 @@ impl From<&str> for VirtioDeviceType {
+             "pmem" => VirtioDeviceType::Pmem,
+             "i2c" => VirtioDeviceType::I2c,
+             "watchdog" => VirtioDeviceType::Watchdog,
++            "can" => VirtioDeviceType::Can,
+             "gpio" => VirtioDeviceType::Gpio,
+             _ => VirtioDeviceType::Unknown,
+         }
+@@ -164,6 +167,7 @@ impl From<VirtioDeviceType> for String {
+             VirtioDeviceType::Pmem => "pmem",
+             VirtioDeviceType::I2c => "i2c",
+             VirtioDeviceType::Watchdog => "watchdog",
++            VirtioDeviceType::Can => "can",
+             VirtioDeviceType::Gpio => "gpio",
+             VirtioDeviceType::Unknown => "UNKNOWN",
+         }
+@@ -187,7 +191,7 @@ impl VirtioDeviceType {
+             VirtioDeviceType::Net => (0, 0),
+             VirtioDeviceType::Block => (0, 0),
+             VirtioDeviceType::Console => (0, 0),
+-            VirtioDeviceType::Rng => (0, 0),
++            VirtioDeviceType::Rng => (1, 64),
+             VirtioDeviceType::Balloon => (0, 0),
+             VirtioDeviceType::Gpu => (0, 0),
+             VirtioDeviceType::Fs9P => (0, 0),
+@@ -199,6 +203,7 @@ impl VirtioDeviceType {
+             VirtioDeviceType::Pmem => (0, 0),
+             VirtioDeviceType::I2c => (1, 1024),
+             VirtioDeviceType::Watchdog => (0, 0),
++            VirtioDeviceType::Can => (3, 64),
+             VirtioDeviceType::Gpio => (2, 256),
+             _ => (0, 0),
+         }

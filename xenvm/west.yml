@@ -1,4 +1,4 @@
-# West manifest for the xenvm (Xen guest) variant ONLY.
+# West manifest for the xenvm (Xen guest) variants ONLY (DoIP and CAN).
 #
 # The NUCLEO build stays on Zephyr v3.7.0 (../west.yml). This variant needs
 # Zephyr v4.4.1, the exact SHA SoDeV's DomZ pins, and SDK 1.0.1. Nothing from
@@ -28,6 +28,13 @@ manifest:
       remote: xaloqi
       revision: bd5d0080a5c459defad106ae1f67f43de1c00c16   # v1.23.0
       path: modules/xaloqi-eds
+
+    # The virtio-can driver for the CAN variant (xenvm/run.sh can). An ordinary
+    # Zephyr module: the DoIP image has no virtio-can node and does not build it.
+    - name: zephyr-virtio-can
+      remote: xaloqi
+      revision: 0c7af59d7e7885a0c36ad19f85ebb90881b357a0   # v0.1.0
+      path: modules/zephyr-virtio-can
 
   self:
     path: Zephyr-Reference-ECU

@@ -1,4 +1,4 @@
-# xenvm: this ECU as a Xen guest (SoDeV's DomZ), reached over DoIP
+# xenvm: this ECU as a Xen guest (SoDeV's DomZ), reached over DoIP or CAN
 
 `xenvm/run.sh` builds and boots a three-domain Xen system on a PC, under QEMU.
 In DomZ, ReferenceBCM (Xaloqi EDS on Zephyr 4.4.1) answers DoIP from a tester in DomD:
@@ -27,6 +27,7 @@ git clone https://github.com/Xaloqi/Zephyr-Reference-ECU && cd Zephyr-Reference-
 xenvm/run.sh            # build what is missing, boot, check
 xenvm/run.sh boot       # boot and check again, reusing the build
 xenvm/run.sh clean      # delete xenvm/build
+xenvm/run.sh can        # the CAN variant (see below)
 ```
 
 You need Docker and nothing else: no sudo, no host toolchain, no Zephyr checkout.
@@ -38,6 +39,72 @@ on failure, so CI can run it as it is.
 Measured from a fresh clone with an empty Docker cache for these images (16 cores):
 **13 min 17 s** wall-clock (about 4 min of it the builder image), **5.8 GB** in `xenvm/build/` and a **2.8 GB** builder image.
 `run.sh boot` takes about **80 s**.
+
+## The CAN variant: `run.sh can`
+
+The same machine, with DomZ on a **CAN bus that DomD owns**, reached through
+**virtio-can**. This is SoDeV's CAN architecture (A): a Zephyr guest with a virtio-can
+frontend, and a driver domain that owns the controller.
+
+```
+QEMU virt (arm64, GICv2, TCG)
+└─ Xen 4.22.0
+   ├─ Dom0  as above: xenstored only
+   ├─ DomD  dom0less, capabilities = <1>. Owns the bus (vcan0) and serves DomZ's devices:
+   │        rust-vmm vhost-device-can (on vcan0) and vhost-device-rng, behind Linaro's
+   │        xen-vhost-frontend (Xen ioreq server, foreign mapping). ISO-TP tester on vcan0
+   └─ DomZ  SoDeV's domz.cfg + virtio-can (device 36) + virtio-rng (backend = DomD,
+            grant_usage = 0). Zephyr 4.4.1 xenvm + Xaloqi/zephyr-virtio-can + EDS:
+            ReferenceBCM, CAN variant (src/main.c), UDS on 0x7E0/0x7E8
+```
+
+```sh
+xenvm/run.sh can        # build what is missing (CAN parts included), boot, check
+xenvm/run.sh can boot   # boot and check again, reusing the build
+```
+
+The run boots DomZ three times. On the first two, the tester in DomD sends
+TesterPresent, an extended session (`10 03`), ReadDataByIdentifier F190 (a multi-frame
+answer, so EDS waits for the tester's flow control) and two SecurityAccess seed requests,
+as UDS over ISO-TP through the kernel's `CAN_ISOTP` socket. A second socket prints every
+frame on vcan0. The third boot is a **canary**: vhost-device-can is attached to `vcan9`
+while the tester stays on `vcan0`, so nothing may answer. The run passes only if every
+request was answered on both boots, the answers crossed vcan0 as `0x7E8` frames, the seed
+nonces all differ, and the canary boot stayed silent while EDS was up and the tester's
+frames were on the bus ([`scripts/check_can.py`](scripts/check_can.py)).
+
+The CAN parts are built in a second image, `xaloqi-zre-xenvm-can:1`. It is the builder
+image plus the Rust toolchain of the `rust` image pinned in [`versions.env`](versions.env),
+for DomD's backends. The DoIP image is unchanged. Measured from a fresh clone with
+both images removed (16 cores, under another job's load): **13 min 8 s** wall-clock (about 3 min of it the two images), **4.7 GB** in `xenvm/build/`, a
+**3.9 GB** CAN image (1.1 GB on top of the builder). A later `run.sh` for DoIP in the same
+build directory adds QEMU and the DoIP image (6.3 GB in all). `run.sh can boot` takes about
+**90 s**.
+
+### What it took, and where it stands upstream
+
+The Zephyr driver is [Xaloqi/zephyr-virtio-can](https://github.com/Xaloqi/zephyr-virtio-can)
+(Apache-2.0), pinned in [`west.yml`](west.yml). It was written from VIRTIO 1.4 and is
+unit-tested in its own repository. The backend side is third-party code, pinned by commit
+and **patched**: one patch file per repository in [`patches/`](patches/), each naming its
+upstream PR or issue.
+
+| Piece | Commit | Patch | Upstream |
+|---|---|---|---|
+| rust-vmm vhost-device (can, rng) | `c0bfee92` | RX buffers lost until RX stops (PR #924, unchanged) | [#923](https://github.com/rust-vmm/vhost-device/issues/923), [#924](https://github.com/rust-vmm/vhost-device/pull/924) |
+| Linaro xen-vhost-frontend | `a1e333c5` | can/rng devices; DriverFeatures read; negotiate on FEATURES_OK; log ioreq errors; one ioreq consumer, kicked from userspace | [#5](https://github.com/vireshk/xen-vhost-frontend/pull/5), [#6](https://github.com/vireshk/xen-vhost-frontend/pull/6), [#7](https://github.com/vireshk/xen-vhost-frontend/pull/7), [#8](https://github.com/vireshk/xen-vhost-frontend/pull/8), [#10](https://github.com/vireshk/xen-vhost-frontend/pull/10) |
+| vireshk/vhost (`frontend/stable`) | `abf24853` | can and rng in the device table | [#37](https://github.com/vireshk/vhost/pull/37) |
+| mathieupoirier/xen-sys | `8a234c94` | domctl interface 0x18 (Xen 4.22) | [#2](https://github.com/mathieupoirier/xen-sys/pull/2) |
+
+Two more pieces live in DomD:
+- [`harness/xs-sock-relay.py`](harness/xs-sock-relay.py). xen-vhost-frontend reaches
+  xenstore only through xenstored's Unix socket, which exists only in the domain that
+  runs xenstored (Dom0 here). A driver domain has the same protocol on `/dev/xen/xenbus`,
+  so the relay serves one from the other
+  ([xen-vhost-frontend#9](https://github.com/vireshk/xen-vhost-frontend/issues/9)).
+- [`scripts/linux.config`](scripts/linux.config) adds CAN, vcan, ISO-TP, `XEN_VIRTIO`
+  and `XEN_PRIVCMD_EVENTFD` (the frontend injects interrupts through privcmd's irqfd) to
+  the Dom0/DomD kernel. That kernel is shared with the DoIP variant, which still passes.
 
 ## Where DomD's right to map DomZ's memory comes from
 
@@ -108,6 +175,49 @@ of cpus`, `getting physinfo: Operation not permitted`, and no DomZ.
 - `xl destroy` reports `unable to remove device` for the virtio devices. Nothing in DomD runs
   the backend half of the device teardown handshake (on SoDeV that is `xl devd`). DomZ is destroyed anyway.
 
+### CAN variant: honest gaps
+
+- **Patched third-party backends.** Until the four patches above are merged upstream,
+  this needs our patch files. Two of the fixes matter under load. Without vhost-device
+  #924, EDS stopped answering on about 1 boot in 15. Without the single-ioreq-consumer
+  change, Xen saw ioreqs completed twice and aborted DomZ's MMIO. See
+  [the stress result](#can-variant-under-host-load).
+- **No grant isolation**, as for DoIP: `grant_usage=0`, and DomD foreign-maps DomZ's RAM.
+- **A virtual bus on a PC.** DomD's bus is `vcan0` in QEMU under TCG, with no CAN
+  controller, no bit timing and no real bus load. Bit timing belongs to the device side:
+  the driver accepts and ignores `can_set_bitrate()`.
+- **Classic CAN only.** CAN FD and RTR are unit-tested in the driver repository, not run
+  end-to-end here.
+- **Backend behaviour we did not fix:** vhost-device-can loops the guest's own frames
+  back to it ([#925](https://github.com/rust-vmm/vhost-device/issues/925), fix PR #937
+  open; EDS's filters never match its own 0x7E8). Its reader busy-polls and keeps one DomD
+  vCPU busy ([#1009](https://github.com/rust-vmm/vhost-device/issues/1009)). It writes a
+  full 64-byte sdu into every RX buffer, so the driver posts 64-byte buffers
+  ([#1008](https://github.com/rust-vmm/vhost-device/issues/1008)).
+- **No kernel fast path for notifications.** Every queue notify is an ioreq to the
+  frontend in userspace. That is slower than privcmd's ioeventfd, and it is the price of
+  the fix above. Irrelevant at CAN rates; not measured.
+- **SoDeV's own stack spawns QEMU** as DomZ's device model (`xl devd`, `backend_type=qemu`).
+  QEMU on Xen cannot serve a vhost-user backend (it has no file descriptor for guest RAM),
+  so their board would need xen-vhost-frontend or an equivalent in DomD. That is a design
+  point for SoDeV, not a defect here.
+- The DoIP gaps apply too: entropy from DomD, no stack canaries, no watchdog, placeholder keys.
+
+### CAN variant under host load
+
+The unpatched backends stalled under host load: EDS stopped answering, mostly after a
+multi-frame exchange. Load recipe from ZRE#34: 16 busy loops on the 16-thread host, three runs
+in parallel (load average 20 to 40), 15 UDS requests per boot.
+
+| Backends | Boots | Stalled | Cause |
+|---|---|---|---|
+| As in the spike (three patches) | 99 | **7** | 6 × RX buffers lost (vhost-device #923); 1 × ioreq completed twice (Xen: `bad IO state 3`, data abort in DomZ) |
+| With the four patches in `patches/` | 96 | **0** | |
+
+At the unpatched rate (7 in 99), 0 in 96 has a probability of about 9×10⁻⁴. `run.sh can`
+itself, under the same load: 9 runs with `XENVM_CAN_BOOTS=8`, all PASS (72 answered boots,
+9 silent canaries). These are measurements on one host, not a proof that no race is left.
+
 ## Going further
 
 This demo, and everything it runs, is free. Each natural next step crosses a licence
@@ -140,7 +250,12 @@ canaries, no watchdog, placeholder keys.
 | `scripts/check.py` | Reads the serial log, prints the evidence, PASS/FAIL |
 | `harness/dom0-init.sh`, `harness/domd-init.sh`, `harness/domd-test.sh` | What Dom0 and DomD run |
 | `harness/doip_probe.py` | The DoIP tester (Python standard library only) |
+| `harness/domd-test-can.sh` | What DomD runs for `run.sh can` (backends, three DomZ boots, the canary) |
+| `harness/isotp_probe.py`, `harness/can_dump.py` | The UDS-over-ISO-TP tester and the wire capture (Python standard library only) |
+| `harness/xs-sock-relay.py` | xenstore socket in DomD for xen-vhost-frontend (see above) |
+| `docker/Dockerfile.can`, `scripts/build-can.sh`, `scripts/check_can.py`, `patches/` | The CAN variant's image, build, check and backend patches |
 | `../boards/xenvm_doip.conf`, `../boards/xenvm_doip.overlay` | The Zephyr side: Kconfig, virtio slots, simulated flash |
+| `../boards/xenvm_can.conf`, `../boards/xenvm_can.overlay` | The same for the CAN variant |
 
 The tester is a stdlib-only probe, not TestLab, because the public `xaloqi-tester`
 package has no DoIP transport (DoIP is part of TestLab Pro).

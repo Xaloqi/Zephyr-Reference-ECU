@@ -4,8 +4,12 @@
 # /build = the output directory. Builds every piece from the pins in
 # xenvm/versions.env. A stage whose output exists is skipped, so a re-run only
 # rebuilds what was removed.
+#   build.sh [doip|can]   the DomZ variant (default doip). `can` runs in the
+#                         CAN builder image and adds scripts/build-can.sh.
 set -euo pipefail
 source /src/xenvm/versions.env
+VARIANT=${1:-doip}
+case $VARIANT in doip|can) ;; *) echo "usage: build.sh [doip|can]" >&2; exit 2 ;; esac
 J=$(nproc)
 B=/build
 DL=$B/dl; SRC=$B/src; OUT=$B/out
@@ -58,6 +62,13 @@ if [ ! -x $B/xen-tools/usr/sbin/xl ]; then
 fi
 
 # --- Linux (Dom0 and DomD) --------------------------------------------------
+# Stamped with scripts/linux.config, so a config change rebuilds the kernel.
+KSTAMP=$OUT/Image.stamp
+KWANT="linux=$LINUX_VER config=$(sha256sum < /src/xenvm/scripts/linux.config | cut -c1-16)"
+if [ -f $OUT/Image ] && [ "$(cat $KSTAMP 2>/dev/null)" != "$KWANT" ]; then
+  log "Linux image is stale (stamp: $(cat $KSTAMP 2>/dev/null || echo none)); rebuilding"
+  rm -f $OUT/Image
+fi
 if [ ! -f $OUT/Image ]; then
   log "build Linux $LINUX_VER (arm64 defconfig + xen.config + built-in backends)"
   fetch $LINUX_URL $LINUX_SHA256
@@ -68,10 +79,11 @@ if [ ! -f $OUT/Image ]; then
   $M olddefconfig >> $B/log-linux.txt 2>&1
   $M -j$J Image >> $B/log-linux.txt 2>&1
   cp $B/obj-linux/arch/arm64/boot/Image $OUT/Image
+  echo "$KWANT" > $KSTAMP
 fi
 
-# --- QEMU as the Xen device model, for DomD ---------------------------------
-if [ ! -f $OUT/qemu-dm ]; then
+# --- QEMU as the Xen device model, for DomD (DoIP variant only) ----------------
+if [ $VARIANT = doip ] && [ ! -f $OUT/qemu-dm ]; then
   log "build QEMU $QEMU_VER device model (aarch64, --enable-xen, xenpvh)"
   fetch $QEMU_URL $QEMU_SHA256
   [ -d $SRC/qemu-$QEMU_VER ] || tar xf $DL/qemu-$QEMU_VER.tar.xz -C $SRC
@@ -114,6 +126,32 @@ if [ ! -f $B/rootfs/.done ]; then
   touch $B/rootfs/.done
 fi
 
+# --- West workspace from xenvm/west.yml (Zephyr v4.4.1, EDS, virtio-can) -------
+west_ws() {
+  WS=$B/ws
+  if [ -d $WS/.west ] && ! cmp -s /src/xenvm/west.yml $WS/manifest/west.yml; then
+    log "xenvm/west.yml changed; updating the west workspace"
+    cp /src/xenvm/west.yml $WS/manifest/west.yml
+    (cd $WS && west update --narrow -o=--depth=1) >> $B/log-west.txt 2>&1
+  fi
+  if [ ! -d $WS/.west ]; then
+    log "west workspace from xenvm/west.yml"
+    rm -rf $WS; mkdir -p $WS/manifest
+    cp /src/xenvm/west.yml $WS/manifest/west.yml
+    (cd $WS && west init -l manifest && west update --narrow -o=--depth=1) > $B/log-west.txt 2>&1
+  fi
+  [ "$(git -C $WS/zephyr rev-parse HEAD)" = "$ZEPHYR_REV" ] || { echo "zephyr is not at $ZEPHYR_REV" >&2; exit 1; }
+  [ "$(git -C $WS/modules/xaloqi-eds rev-parse HEAD)" = "$EDS_REV" ] || { echo "EDS is not at $EDS_REV" >&2; exit 1; }
+  [ "$(git -C $WS/modules/zephyr-virtio-can rev-parse HEAD)" = "$VIRTIO_CAN_REV" ] || \
+    { echo "zephyr-virtio-can is not at $VIRTIO_CAN_REV" >&2; exit 1; }
+}
+
+if [ $VARIANT = can ]; then
+  source /src/xenvm/scripts/build-can.sh
+  log "artifacts:"; ls -l $OUT $OUT/can
+  exit 0
+fi
+
 # --- Zephyr: ReferenceBCM (DoIP) for xenvm, Zephyr v4.4.1 --------------------
 # The image is stamped with the commits it was built from (run.sh checks the stamp
 # before every boot). An image whose stamp disagrees with the pins is rebuilt.
@@ -129,15 +167,7 @@ if [ -f $OUT/zephyr-domz.bin ] && [ "$(cat $STAMP 2>/dev/null)" != "$WANT" ]; th
   rm -f $OUT/zephyr-domz.bin $STAMP
 fi
 if [ ! -f $OUT/zephyr-domz.bin ]; then
-  log "west workspace from xenvm/west.yml"
-  WS=$B/ws
-  if [ ! -d $WS/.west ]; then
-    rm -rf $WS; mkdir -p $WS/manifest
-    cp /src/xenvm/west.yml $WS/manifest/west.yml
-    (cd $WS && west init -l manifest && west update --narrow -o=--depth=1) > $B/log-west.txt 2>&1
-  fi
-  [ "$(git -C $WS/zephyr rev-parse HEAD)" = "$ZEPHYR_REV" ] || { echo "zephyr is not at $ZEPHYR_REV" >&2; exit 1; }
-  [ "$(git -C $WS/modules/xaloqi-eds rev-parse HEAD)" = "$EDS_REV" ] || { echo "EDS is not at $EDS_REV" >&2; exit 1; }
+  west_ws
   log "build ReferenceBCM (DoIP) for xenvm"
   # prj.conf asks for CONFIG_STACK_CANARIES=y. On Zephyr 4.4 that symbol is a
   # member of an optional choice, and a later =n (boards/xenvm_doip.conf) does

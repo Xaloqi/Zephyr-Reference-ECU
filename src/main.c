@@ -82,6 +82,22 @@
 
 LOG_MODULE_REGISTER(reference_bcm, LOG_LEVEL_INF);
 
+#if defined(DIAG_ENTROPY_SEEDS)
+#include <zephyr/drivers/entropy.h>
+
+/* SecurityAccess seeds from the board's zephyr,entropy device (virtio-rng on
+ * xenvm), as in src/main_doip.c. Opt-in through CMake's DIAG_ENTROPY_SEEDS. */
+static const struct device *const s_entropy_dev =
+    DEVICE_DT_GET(DT_CHOSEN(zephyr_entropy));
+
+static uds_status_t s_trng_cb(uint8_t *buf, uint8_t len)
+{
+    int rc = entropy_get_entropy(s_entropy_dev, buf, (uint16_t)len);
+
+    return (rc == 0) ? UDS_STATUS_OK : UDS_STATUS_ERR_PLATFORM;
+}
+#endif /* DIAG_ENTROPY_SEEDS */
+
 /* =============================================================================
  * Configuration
  * ============================================================================= */
@@ -406,7 +422,20 @@ int main(void)
      * keys from OTP. See EDS's docs/SECURITY_NOTICE.md.
      */
     LOG_WRN("[SEC] Using placeholder AES keys — inject OEM keys before production.");
+#if defined(DIAG_ENTROPY_SEEDS)
+    if (device_is_ready(s_entropy_dev)) {
+        (void)uds_security_algo_set_rng_cb(s_trng_cb);
+        LOG_INF("[SEC] SecurityAccess seeds from entropy device %s",
+                s_entropy_dev->name);
+    } else {
+        /* Fail closed, as in src/main_doip.c. */
+        LOG_ERR("[SEC] Entropy device %s not ready — refusing to start.",
+                s_entropy_dev->name);
+        return -1;
+    }
+#else
     (void)uds_security_algo_set_rng_cb(NULL);
+#endif
 
     status = uds_generated_init(can, DIAG_RX_CAN_ID, DIAG_TX_CAN_ID);
     if (status != UDS_STATUS_OK) {

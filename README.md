@@ -327,7 +327,7 @@ Commands and the full campaign: [docs/secure-boot.md](docs/secure-boot.md#firmwa
 
 ---
 
-## As a Xen guest: AGL SoDeV's DomZ, over DoIP
+## As a Xen guest: AGL SoDeV's DomZ, over DoIP or CAN
 
 `xenvm/run.sh` builds Xen 4.22, two Linux domains, QEMU and this ECU (DoIP build,
 Zephyr 4.4.1 `xenvm`), all in a container, and boots them under QEMU. A dom0less driver
@@ -335,6 +335,12 @@ domain (DomD) creates DomZ from SoDeV's `domz.cfg`, backs its virtio-net and
 virtio-rng, and runs a DoIP tester against it. The script needs Docker only and ends
 in PASS or FAIL. The NUCLEO builds above stay on Zephyr v3.7.0; this variant has its
 own manifest, [xenvm/west.yml](xenvm/west.yml).
+
+`xenvm/run.sh can` is the CAN variant: DomZ (this ECU's CAN build) on a CAN bus that DomD
+owns, through virtio-can, answering UDS over ISO-TP from a tester in DomD. The Zephyr
+driver is [Xaloqi/zephyr-virtio-can](https://github.com/Xaloqi/zephyr-virtio-can); DomD
+serves it with rust-vmm's vhost-device-can and Linaro's xen-vhost-frontend, patched
+(the patches and their upstream links are in [xenvm/README.md](xenvm/README.md#the-can-variant-runsh-can)).
 
 What it proves and what it leaves out (no grant isolation, entropy from the backend
 domain, no watchdog, no canaries, placeholder keys): [xenvm/README.md](xenvm/README.md).
