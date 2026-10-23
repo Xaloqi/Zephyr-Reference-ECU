@@ -76,9 +76,10 @@ frames were on the bus ([`scripts/check_can.py`](scripts/check_can.py)).
 The CAN parts are built in a second image, `xaloqi-zre-xenvm-can:1`. It is the builder
 image plus the Rust toolchain of the `rust` image pinned in [`versions.env`](versions.env),
 for DomD's backends. The DoIP image is unchanged. Measured from a fresh clone with
-both images removed (16 cores): **@CAN_COLD@** wall-clock, **@CAN_DISK@** in `xenvm/build/`, a
-**@CAN_IMG@** CAN image (@CAN_IMG_DELTA@ on top of the builder). `run.sh can boot` takes about
-**@CAN_BOOT@**.
+both images removed (16 cores, under another job's load): **13 min 8 s** wall-clock (about 3 min of it the two images), **4.7 GB** in `xenvm/build/`, a
+**3.9 GB** CAN image (1.1 GB on top of the builder). A later `run.sh` for DoIP in the same
+build directory adds QEMU and the DoIP image (6.3 GB in all). `run.sh can boot` takes about
+**90 s**.
 
 ### What it took, and where it stands upstream
 
@@ -204,7 +205,18 @@ of cpus`, `getting physinfo: Operation not permitted`, and no DomZ.
 
 ### CAN variant under host load
 
-@STRESS@
+The unpatched backends stalled under host load: EDS stopped answering, mostly after a
+multi-frame exchange. Load recipe from ZRE#34: 16 busy loops on the 16-thread host, three runs
+in parallel (load average 20 to 40), 15 UDS requests per boot.
+
+| Backends | Boots | Stalled | Cause |
+|---|---|---|---|
+| As in the spike (three patches) | 99 | **7** | 6 × RX buffers lost (vhost-device #923); 1 × ioreq completed twice (Xen: `bad IO state 3`, data abort in DomZ) |
+| With the four patches in `patches/` | 96 | **0** | |
+
+At the unpatched rate (7 in 99), 0 in 96 has a probability of about 9×10⁻⁴. `run.sh can`
+itself, under the same load: 9 runs with `XENVM_CAN_BOOTS=8`, all PASS (72 answered boots,
+9 silent canaries). These are measurements on one host, not a proof that no race is left.
 
 ## Going further
 
