@@ -23,18 +23,21 @@ mkdir -p "$OUT"
 
 if [ "$MODE" = run ]; then
   echo "== disk at job start"; df -h / /mnt 2>/dev/null | tee "$OUT/df-before.txt"
-  # Docker's images live on /, the build dir on /mnt. If / is short (needs ~12 GB of
-  # images and layers), drop the preinstalled toolchains this job never uses.
+  # The build dir and Docker's images share one filesystem on current runners (/ and
+  # /mnt are the same 145 GB device); the run needs ~15 GB. If it is short, drop the
+  # preinstalled toolchains this job never uses, and stop early if that is not enough.
   FREE_GB=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
-  if [ "$FREE_GB" -lt 25 ]; then
+  if [ "$FREE_GB" -lt 30 ]; then
     echo "== / has ${FREE_GB} GB free; removing unused preinstalled toolchains"
     sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/.ghcup
     df -h / | tee -a "$OUT/df-before.txt"
+    FREE_GB=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+    [ "$FREE_GB" -ge 20 ] || { echo "FAIL: only ${FREE_GB} GB free on /, the run needs about 15"; exit 1; }
   fi
   sudo mkdir -p "$BUILD" && sudo chown "$(id -u):$(id -g)" "$BUILD"
 
-  # Peak use of both filesystems, sampled every 10 s.
-  ( while :; do echo "$(df --output=used -B1 / | tail -1 | tr -dc 0-9) $(df --output=used -B1 /mnt | tail -1 | tr -dc 0-9)"; sleep 10; done ) > "$OUT/disk-samples.txt" &
+  # Disk in use on / (build dir and Docker images), sampled every 10 s.
+  ( while :; do df --output=used -B1 / | tail -1 | tr -dc 0-9; echo; sleep 10; done ) > "$OUT/disk-samples.txt" &
   SAMPLER=$!
 
   rm -f "$OUT/rc"
@@ -57,11 +60,11 @@ if [ "$RC" = 0 ] && [[ "$LAST" == PASS* ]]; then RESULT=pass; else RESULT=fail; 
 # Artifacts: the serial log, run.sh's stdout, the build logs, disk use, the gate's verdict.
 cp "$BUILD/$SERIAL" "$OUT/serial.log" 2>/dev/null || echo "(no $SERIAL: boot never ran)" > "$OUT/serial.log"
 cp "$BUILD"/log-*.txt "$OUT/" 2>/dev/null || true
-read -r PEAK_ROOT PEAK_MNT < <(awk 'NF==2 { if ($1>a) a=$1; if ($2>b) b=$2 } END { printf "%.1f %.1f\n", a/2^30, b/2^30 }' "$OUT/disk-samples.txt" 2>/dev/null || echo "0 0")
+PEAK=$(awk 'NF { if (!n++) first=$1; if ($1>max) max=$1 } END { if (n) printf "%.1f", (max-first)/2^30; else print "?" }' "$OUT/disk-samples.txt" 2>/dev/null)
 {
   echo "variant=$V result=$RESULT run_sh_exit=$RC"
   echo "final line: $LAST"
-  echo "peak disk used: / ${PEAK_ROOT:-?} GiB (Docker images), /mnt ${PEAK_MNT:-?} GiB (build dir); free at start/end: see df-*.txt"
+  echo "peak disk use above job start: ${PEAK} GiB (build dir + Docker images); free before/after: see df-before.txt, df-after.txt"
 } | tee "$OUT/gate.txt"
 echo "$RESULT" > "$OUT/result"
 { tail -n 40 "$OUT/stdout.log" 2>/dev/null

@@ -45,14 +45,14 @@ permissions:
   contents: read
 
 env:
-  XENVM_BUILD_DIR: /mnt/xenvm-build
+  XENVM_BUILD_DIR: /mnt/xenvm-build   # same 145 GB filesystem as / on current runners; ~15 GB used
   XENVM_CI_OUT: ${{ github.workspace }}/ci-out
 
 jobs:
   doip:
     name: "xenvm/run.sh (DoIP)"
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     concurrency:
       group: xenvm-weekly-doip-${{ github.ref }}
       cancel-in-progress: true
@@ -61,7 +61,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Run xenvm/run.sh
-        timeout-minutes: 105
+        timeout-minutes: 50
         run: .github/scripts/xenvm-weekly.sh run doip
       - name: Gate (exit 0 and a final line starting with PASS)
         if: always()
@@ -78,7 +78,7 @@ jobs:
   can:
     name: "xenvm/run.sh can (virtio-can)"
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     concurrency:
       group: xenvm-weekly-can-${{ github.ref }}
       cancel-in-progress: true
@@ -87,7 +87,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Run xenvm/run.sh can
-        timeout-minutes: 105
+        timeout-minutes: 50
         run: .github/scripts/xenvm-weekly.sh run can
       - name: Gate (exit 0 and a final line starting with PASS)
         if: always()
