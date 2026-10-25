@@ -20,7 +20,7 @@ act() { if [ "$DRY" = 1 ]; then echo "DRY RUN would run: gh $*"; else gh "$@"; f
 
 if [ "$RESULT" = fail ]; then
   BODY=$(printf 'The weekly run of `%s` failed.\n\nRun: %s\n\n<details><summary>Last lines of the log</summary>\n\n```\n%s\n```\n</details>\n\nThe full serial log and stdout are attached to the run for 14 days. Independently of the cause, this is a real result: the demo no longer builds or no longer PASSes from its pinned sources on a fresh runner.' \
-        "$CMD" "$URL" "$(tail -n 40 "$DIR/tail.txt" 2>/dev/null || echo '(no log captured)')")
+        "$CMD" "$URL" "$(cat "$DIR/tail.txt" 2>/dev/null || echo '(no log captured)')")
   if [ -n "$NUM" ]; then
     echo "open tracking issue #$NUM exists: commenting"
     act issue comment "$NUM" --body "$BODY"

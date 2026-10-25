@@ -68,8 +68,9 @@ PEAK=$(awk 'NF { if (!n++) first=$1; if ($1>max) max=$1 } END { if (n) printf "%
 } | tee "$OUT/gate.txt"
 echo "$RESULT" > "$OUT/result"
 { tail -n 40 "$OUT/stdout.log" 2>/dev/null
+  # A failed build says only "see the logs": add the end of the newest build log.
   NEWEST=$(ls -t "$OUT"/log-*.txt 2>/dev/null | head -1)
-  [ -n "$NEWEST" ] && { echo "--- tail of $(basename "$NEWEST")"; tail -n 40 "$NEWEST"; }
+  if [ "$RESULT" = fail ] && [ -n "$NEWEST" ]; then echo "--- tail of $(basename "$NEWEST")"; tail -n 30 "$NEWEST"; fi
 } > "$OUT/tail.txt"
 
 if [ "$RESULT" != pass ]; then
