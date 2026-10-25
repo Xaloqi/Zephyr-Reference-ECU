@@ -107,7 +107,7 @@ jobs:
   report:
     name: "tracking issue (${{ matrix.variant }})"
     needs: [doip, can]
-    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -133,7 +133,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          DRY_RUN: ${{ github.event_name != 'schedule' && '1' || '0' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
           JOB_RESULT: ${{ matrix.variant == 'doip' && needs.doip.result || needs.can.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
