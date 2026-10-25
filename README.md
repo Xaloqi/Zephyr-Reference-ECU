@@ -378,6 +378,8 @@ through a bootloader.** That was all done manually, on the bench — see
 hardware-in-the-loop runner, and nothing re-verifies any of it on every
 push.
 
+A separate weekly workflow (`.github/workflows/xenvm-weekly.yml`, also on changes to `xenvm/`) runs both xenvm demos in full (`xenvm/run.sh` and `xenvm/run.sh can`) on a fresh GitHub-hosted runner. It proves both demos still build and PASS from their pinned sources; a failure opens a tracking issue. It does not prove anything on real hardware, any timing or the Raspberry Pi 5, that the pins are the latest versions, or that the patched backends match upstream.
+
 **The full CAN diagnostic surface has been exercised for real, on the
 bench, over the physical bus** — raw ISO-TP frames (`can-utils`'
 `isotpsend`/`isotprecv`, free, no Pro transport needed) and a real

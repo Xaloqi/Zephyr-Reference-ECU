@@ -1,5 +1,7 @@
 # xenvm: this ECU as a Xen guest (SoDeV's DomZ), reached over DoIP or CAN
 
+[![xenvm weekly](https://github.com/Xaloqi/Zephyr-Reference-ECU/actions/workflows/xenvm-weekly.yml/badge.svg?branch=main)](https://github.com/Xaloqi/Zephyr-Reference-ECU/actions/workflows/xenvm-weekly.yml)
+
 `xenvm/run.sh` builds and boots a three-domain Xen system on a PC, under QEMU.
 In DomZ, ReferenceBCM (Xaloqi EDS on Zephyr 4.4.1) answers DoIP from a tester in DomD:
 
@@ -145,6 +147,8 @@ of cpus`, `getting physinfo: Operation not permitted`, and no DomZ.
 | Zephyr | **v4.4.1 `1f6485ec`**, SDK 1.0.1, board `xenvm` (GICv2) | the same SHA |
 | EDS | **v1.23.0** `bd5d008` | not present |
 | Machine | QEMU 10.0 `virt`, cortex-a57, 4 CPUs, 4 GiB, TCG | Raspberry Pi 5 / 4 (Cortex-A76 / A72, GIC-400) |
+
+EDS stays at the release the AGL post and the blog article cite (v1.23.0). A newer EDS release is adopted when it changes something this build uses, or when something new about xenvm is published; the full `run.sh` is then re-run and the article updated in the same change.
 
 ## Honest gaps
 

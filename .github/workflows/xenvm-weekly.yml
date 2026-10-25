@@ -1,0 +1,147 @@
+# =============================================================================
+# Xaloqi Zephyr-Reference-ECU — .github/workflows/xenvm-weekly.yml
+#
+# Runs the two publicly linked xenvm demos in full, on a fresh GitHub-hosted
+# runner, from their pinned sources:
+#
+#   doip  — xenvm/run.sh        (EDS in DomZ, DoIP from DomD)
+#   can   — xenvm/run.sh can    (EDS in DomZ, UDS over ISO-TP, virtio-can)
+#
+# Why: Debian 13 packages and Zephyr's Python requirements are not pinned, and
+# the CAN variant builds patched third-party Rust backends. Either demo can
+# break with no commit of ours. See README.md "What CI does and does not prove".
+#
+# A job passes only if run.sh exits 0 AND its last output line starts with
+# "PASS" (.github/scripts/xenvm-weekly.sh finish). Both are required.
+# No retries: on the CAN variant a stall under load was a real bug (now fixed),
+# so a stall now is a regression, not noise.
+#
+# On a failed SCHEDULED run each variant opens (or comments on) one tracking
+# issue, and closes it on the next pass. GitHub disables scheduled workflows
+# after 60 days without repository activity: re-enable under Actions > "xenvm
+# weekly" > "Enable workflow".
+#
+# GitHub-hosted runners only. This repository is public and runs fork PR code.
+# =============================================================================
+
+name: xenvm weekly
+
+on:
+  schedule:
+    - cron: "17 3 * * 0"   # Sundays 03:17 UTC, off-peak, off the hour
+  workflow_dispatch:
+  pull_request:
+    paths: &paths
+      - "xenvm/**"
+      - "boards/xenvm_doip.*"
+      - "boards/xenvm_can.*"
+      - ".github/workflows/xenvm-weekly.yml"
+      - ".github/scripts/xenvm-weekly*.sh"
+  push:
+    branches: [main]
+    paths: *paths
+
+permissions:
+  contents: read
+
+env:
+  XENVM_BUILD_DIR: /mnt/xenvm-build   # same 145 GB filesystem as / on current runners; ~15 GB used
+  XENVM_CI_OUT: ${{ github.workspace }}/ci-out
+
+jobs:
+  doip:
+    name: "xenvm/run.sh (DoIP)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: xenvm-weekly-doip-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run xenvm/run.sh
+        timeout-minutes: 50
+        run: .github/scripts/xenvm-weekly.sh run doip
+      - name: Gate (exit 0 and a final line starting with PASS)
+        if: always()
+        run: .github/scripts/xenvm-weekly.sh finish doip
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xenvm-doip-logs
+          path: ci-out/
+          retention-days: 14
+          if-no-files-found: warn
+
+  can:
+    name: "xenvm/run.sh can (virtio-can)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: xenvm-weekly-can-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run xenvm/run.sh can
+        timeout-minutes: 50
+        run: .github/scripts/xenvm-weekly.sh run can
+      - name: Gate (exit 0 and a final line starting with PASS)
+        if: always()
+        run: .github/scripts/xenvm-weekly.sh finish can
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xenvm-can-logs
+          path: ci-out/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # Tracking issues. A separate job so that only this one holds issues: write and
+  # none of the jobs that build and run repository code does. Scheduled runs act;
+  # a manual dispatch only prints what it would do.
+  report:
+    name: "tracking issue (${{ matrix.variant }})"
+    needs: [doip, can]
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [doip, can]
+    concurrency:
+      group: xenvm-weekly-report-${{ matrix.variant }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: xenvm-${{ matrix.variant }}-logs
+          path: ci-out
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          JOB_RESULT: ${{ matrix.variant == 'doip' && needs.doip.result || needs.can.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # The gate's verdict, written by the job itself. No file = the job never got
+          # that far (runner lost, killed): a failure, unless it was cancelled on purpose.
+          if [ "$JOB_RESULT" = cancelled ] || [ "$JOB_RESULT" = skipped ]; then
+            echo "job was $JOB_RESULT: no verdict, leaving the tracking issue alone"; exit 0
+          fi
+          R=$(cat ci-out/result 2>/dev/null || echo fail)
+          echo "variant ${{ matrix.variant }}: job result $JOB_RESULT, gate verdict $R, dry run $DRY_RUN"
+          .github/scripts/xenvm-weekly-issue.sh "${{ matrix.variant }}" "$R" "$RUN_URL" ci-out
