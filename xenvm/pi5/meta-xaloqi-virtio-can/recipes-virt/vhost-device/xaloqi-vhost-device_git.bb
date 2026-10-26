@@ -22,7 +22,7 @@ S = "${UNPACKDIR}/vhost-device"
 
 inherit cargo
 
-require vhost-device-crates.inc
+require xaloqi-vhost-device-crates.inc
 
 # A workspace: build only the two backends DomZ uses, with Xen support.
 CARGO_BUILD_FLAGS += "-p vhost-device-can -p vhost-device-rng \
@@ -34,8 +34,13 @@ do_install() {
     install -m 0755 ${B}/target/${CARGO_TARGET_SUBDIR}/vhost-device-rng ${D}${bindir}/
 }
 
-PACKAGES =+ "vhost-device-can vhost-device-rng"
-FILES:vhost-device-can = "${bindir}/vhost-device-can"
-FILES:vhost-device-rng = "${bindir}/vhost-device-rng"
+# Named xaloqi-*: meta-virtualization has its own vhost-device-rng recipe (an
+# unpatched, older pin), and two recipes may not share a package name. Ours
+# installs the same /usr/bin path, so the two conflict at runtime too.
+PACKAGES =+ "xaloqi-vhost-device-can xaloqi-vhost-device-rng"
+FILES:xaloqi-vhost-device-can = "${bindir}/vhost-device-can"
+FILES:xaloqi-vhost-device-rng = "${bindir}/vhost-device-rng"
+RCONFLICTS:xaloqi-vhost-device-rng = "vhost-device-rng"
+RCONFLICTS:xaloqi-vhost-device-can = "vhost-device-can"
 
 COMPATIBLE_HOST = "aarch64.*-linux"

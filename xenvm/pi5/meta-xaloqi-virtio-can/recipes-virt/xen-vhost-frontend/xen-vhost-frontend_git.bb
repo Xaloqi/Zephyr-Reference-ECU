@@ -39,8 +39,11 @@ require xen-vhost-frontend-crates.inc
 # cargo_common would add its own [patch] for every named git fetch with a
 # destsuffix, keyed by the fetch name. The patched Cargo.toml already patches
 # both git dependencies by path, and the patched Cargo.lock has no git sources
-# left, so that postfunc must not run (it would add wrong crate names).
-do_configure[postfuncs]:remove = "cargo_common_do_patch_paths"
+# left, so that postfunc must do nothing here (it would add wrong crate names).
+# Overridden rather than removed: bitbake does not take :remove on a varflag.
+python cargo_common_do_patch_paths() {
+    bb.note("xen-vhost-frontend: git dependencies are patched by path in Cargo.toml; nothing to add")
+}
 
 do_install() {
     install -d ${D}${bindir}
