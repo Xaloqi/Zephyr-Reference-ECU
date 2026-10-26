@@ -1,0 +1,185 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Xaloqi
+#
+# Pi 5 CAN bench, run in SoDeV's DomD (the toolstack domain). One subcommand per
+# step of the arrival-day plan (xaloqi-knowledge campaigns/2026-10-26-pi5-bringup-prep.md, Q5).
+# Every step logs to $LOGDIR and ends with one line: PASS or FAIL: <reason>.
+#
+#   xaloqi-can-bench up [BITRATE]   can0 + can1 at BITRATE (500000), vcan9 for the canary
+#   xaloqi-can-bench wire [SECS]    print every frame on can1 (candump)
+#   xaloqi-can-bench nucleo         UDS to the NUCLEO (ECU 0: 0x7E0/0x7E8) from can1
+#   xaloqi-can-bench domz [BUS]     virtio-can: backends on BUS (can0), DomZ-CAN (ECU 1:
+#                                   0x7E1/0x7E9), UDS to it from can1 across the bus
+#   xaloqi-can-bench canary         as domz with the backend on vcan9: DomZ must stay
+#                                   silent while the NUCLEO still answers
+#   xaloqi-can-bench p2 ECU [N]     P2 for ECU 0 (NUCLEO) or 1 (DomZ-CAN), N samples (1000)
+#   xaloqi-can-bench down           destroy DomZ-CAN, stop the backends
+#
+# Topology: HAT can0 and can1 and the NUCLEO are on ONE physical bus. The tester
+# always uses can1 and the virtio-can backend uses can0, so every request to
+# either ECU crosses the wire. (A tester on can0 would reach DomZ through
+# SocketCAN's local loopback without touching the bus.)
+set -u
+LIB=/usr/libexec/xaloqi-can
+BIN=/usr/lib/xen/boot/zephyr-domz-can.bin
+NAME=DomZ-CAN
+TESTER=can1
+LOGDIR=${XAQ_LOGDIR:-/var/log/xaloqi-can}
+# standalone on SoDeV's libxl (see cfg below). Empty for upstream xl, which has no
+# backend_type key: the QEMU rehearsal (xenvm/pi5/rehearse.sh) sets it so.
+BT=${XAQ_BACKEND_TYPE-standalone}
+# 1 in the QEMU rehearsal: can0/can1 are vcan, which take no bitrate.
+VIRTUAL=${XAQ_VIRTUAL:-0}
+RUN=/run/xaloqi-can
+mkdir -p "$LOGDIR" "$RUN"
+ts() { date +%Y%m%dT%H%M%S; }
+pass() { echo "PASS: $*"; exit 0; }
+fail() { echo "FAIL: $*"; exit 1; }
+
+up() {
+  br=${1:-500000}
+  for i in can0 can1; do
+    ip link show $i >/dev/null 2>&1 || fail "$i missing (MCP2515 not probed? dmesg | grep -i mcp251)"
+    [ "$VIRTUAL" = 1 ] && { ip link set $i up; continue; }
+    ip link set $i down 2>/dev/null
+    # 16 MHz MCP2515: 8 MHz CAN clock, 16 tq at 500 kbit/s, 87.5 % = the NUCLEO's sample point.
+    ip link set $i type can bitrate "$br" sample-point 0.875 restart-ms 100 || fail "$i: bitrate $br"
+    ip link set $i up || fail "$i up"
+  done
+  ip link show vcan9 >/dev/null 2>&1 || { ip link add dev vcan9 type vcan && ip link set vcan9 up; }
+  ip -details link show can0 | sed -n '1,6p'
+  ip -details link show can1 | grep -E 'bitrate|state'
+  [ "$VIRTUAL" = 1 ] && pass "can0/can1 up (virtual), vcan9 up"
+  pass "can0/can1 up at $br bit/s, vcan9 up"
+}
+
+wire() { candump -td -c "$TESTER" -T $(( ${1:-10} * 1000 )); }
+
+probe() { # <req> <rsp> <log>
+  python3 $LIB/can_dump.py $TESTER 15 400 WIRE > "$3.wire" 2>&1 &
+  W=$!
+  sleep 0.3
+  timeout 30 python3 $LIB/isotp_probe.py $TESTER "$1" "$2" | tee "$3"
+  sleep 1; kill $W 2>/dev/null; wait $W 2>/dev/null
+  cat "$3.wire"
+}
+
+answered() { # <log>: every request answered (no TIMEOUT), 5 exchanges
+  [ "$(grep -c '^UDS ' "$1")" -ge 5 ] && ! grep -q 'TIMEOUT' "$1"
+}
+
+nucleo() {
+  L=$LOGDIR/nucleo-$(ts).log
+  probe 7E0 7E8 "$L"
+  answered "$L" || fail "NUCLEO did not answer every request ($L)"
+  grep -q 'WIRE can1 7E8 ' "$L.wire" || fail "no 0x7E8 frame on $TESTER"
+  pass "NUCLEO (ECU 0) answered 3E/10 03/22 F190/27 01 x2 over the physical bus ($L)"
+}
+
+backends() { # <bus>
+  stop_backends
+  if [ ! -S /var/run/xenstored/socket ]; then
+    # SoDeV's xenstore server is in the Zephyr Dom0; DomD has only /dev/xen/xenbus.
+    python3 $LIB/xs-sock-relay.py > $RUN/relay.log 2>&1 &
+    echo $! > $RUN/relay.pid
+    for i in $(seq 1 50); do [ -S /var/run/xenstored/socket ] && break; sleep 0.1; done
+  fi
+  rm -f $RUN/can.sock0 $RUN/rng.sock0
+  vhost-device-can --socket-path $RUN/can.sock --can-devices "$1" > $RUN/vdc.log 2>&1 & echo $! > $RUN/vdc.pid
+  vhost-device-rng --socket-path $RUN/rng.sock > $RUN/vdr.log 2>&1 & echo $! > $RUN/vdr.pid
+  for i in $(seq 1 50); do [ -S $RUN/can.sock0 ] && [ -S $RUN/rng.sock0 ] && break; sleep 0.1; done
+  [ -S $RUN/can.sock0 ] || fail "vhost-device-can did not start ($RUN/vdc.log)"
+  xen-vhost-frontend --socket-path $RUN/ --foreign-mapping > $RUN/xvf.log 2>&1 & echo $! > $RUN/xvf.pid
+  sleep 1
+}
+
+stop_backends() {
+  for p in xvf vdc vdr relay; do
+    [ -f $RUN/$p.pid ] && kill "$(cat $RUN/$p.pid)" 2>/dev/null
+    rm -f $RUN/$p.pid
+  done
+  sleep 0.5
+}
+
+cfg() { # DomZ-CAN's cfg: SoDeV's domz.cfg, our image, two virtio devices
+  [ -f /etc/xen/domz.cfg ] || fail "/etc/xen/domz.cfg missing (image built without -z?)"
+  sed -e '/^virtio = \[\]/d' -e '/^name = /d' -e '/^kernel = /d' /etc/xen/domz.cfg > $RUN/domz-can.cfg
+  # backend_type=standalone: SoDeV's libxl (0014) defaults virtio backends to
+  # qemu, and would try to spawn one; ours are vhost-user behind xen-vhost-frontend.
+  # Upstream xl has no such key, which is why the QEMU harness's cfg lacks it.
+  cat >> $RUN/domz-can.cfg <<CFG
+name = "$NAME"
+kernel = "$BIN"
+virtio = [ "backend=DomD, type=virtio,device24, transport=mmio, grant_usage=0${BT:+, backend_type=$BT}",
+           "backend=DomD, type=virtio,device4, transport=mmio, grant_usage=0${BT:+, backend_type=$BT}" ]
+CFG
+}
+
+create() {
+  xl destroy $NAME 2>/dev/null
+  cfg
+  # Paused first: the frontend must claim the slots before the guest probes them.
+  xl create -p $RUN/domz-can.cfg 2>&1 | grep -v '^Parsing config' || true
+  ID=$(xl domid $NAME 2>/dev/null) || fail "xl create $NAME failed"
+  echo "$NAME domid=$ID"
+  B=$(xenstore-ls -f /local/domain/1/backend/virtio/$ID 2>/dev/null)
+  echo "$B" | grep -E '/(base|irq|type|transport|grant_usage|backend_type) '
+  # boards/xenvm_can.overlay hard-codes slot 0 = 0x02000000/SPI 33 (virtio-can) and
+  # slot 1 = 0x02000200/SPI 34 (virtio-rng). If this libxl placed them elsewhere,
+  # Zephyr would probe empty slots: stop here rather than chase a silent DomZ.
+  echo "$B" | grep -q '/0/base = "0x2000000"' && echo "$B" | grep -q '/0/irq = "33"' \
+    || { xl destroy $NAME; fail "virtio slot 0 is not 0x2000000/33 (see xenstore above)"; }
+  xl unpause $NAME
+  C=/var/log/xen/console/guest-$NAME.log
+  for i in $(seq 1 60); do grep -q 'diag task started\|refusing' $C 2>/dev/null && break; sleep 1; done
+  sleep 2
+}
+
+domz() {
+  bus=${1:-can0}
+  L=$LOGDIR/domz-$bus-$(ts).log
+  backends "$bus"
+  create
+  probe 7E1 7E9 "$L"
+  echo "--- $NAME console"; sed 's/\x1b\[[0-9;]*m//g' /var/log/xen/console/guest-$NAME.log | grep -v '^$' | tee "$L.console"
+  echo "--- xen-vhost-frontend"; cat $RUN/xvf.log
+  grep -q 'TX=0x7E9 PHYS=0x7E1' "$L.console" || fail "$NAME is not ECU 1 (no 'TX=0x7E9 PHYS=0x7E1' at boot)"
+  answered "$L" || fail "$NAME did not answer every request ($L)"
+  grep -q 'WIRE can1 7E9 ' "$L.wire" || fail "no 0x7E9 frame on $TESTER: the answer did not cross the bus"
+  pass "$NAME (ECU 1) answered over virtio-can (backend on $bus) and the physical bus ($L)"
+}
+
+canary() {
+  L=$LOGDIR/canary-$(ts).log
+  backends vcan9
+  create
+  probe 7E1 7E9 "$L"
+  grep -q 'diag task started' /var/log/xen/console/guest-$NAME.log || fail "EDS did not start in $NAME: canary is vacuous"
+  grep -q 'WIRE can1 7E1 ' "$L.wire" || fail "the tester's requests are not on the bus: canary is vacuous"
+  grep -q 'TIMEOUT' "$L" && ! grep -q -- '-> [0-9a-f]' "$L" || fail "$NAME answered with its backend on vcan9"
+  grep -q 'WIRE can1 7E9 ' "$L.wire" && fail "0x7E9 frames on the bus with the backend on vcan9"
+  # Positive control: the bus itself still works.
+  L2=$LOGDIR/canary-nucleo-$(ts).log
+  probe 7E0 7E8 "$L2"
+  answered "$L2" || fail "NUCLEO did not answer during the canary: the bus is down, canary inconclusive"
+  pass "backend on vcan9: $NAME silent, NUCLEO answered ($L, $L2)"
+}
+
+p2() {
+  e=${1:?ECU 0 or 1}; n=${2:-1000}
+  case $e in 0) q=7E0; r=7E8 ;; 1) q=7E1; r=7E9 ;; *) fail "ECU is 0 or 1" ;; esac
+  python3 $LIB/uds_timing.py $TESTER $q $r "$n" 20 "$LOGDIR/p2-ecu$e-$(ts).csv"
+}
+
+down() {
+  xl destroy $NAME 2>/dev/null
+  stop_backends
+  pass "$NAME destroyed, backends stopped"
+}
+
+cmd=${1:-}; [ $# -gt 0 ] && shift
+case $cmd in
+  up|wire|nucleo|domz|canary|p2|down) $cmd "$@" ;;
+  *) sed -n '5,17p' "$0"; exit 2 ;;
+esac

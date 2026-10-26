@@ -29,9 +29,11 @@ initrd() { # <name> <init> <payload files...>; <src>:<name> installs src as /roo
 initrd dom0 $H/dom0-init.sh $OUT/xs-seed-port
 if [ $VARIANT = can ]; then
   printf 'BOOTS=%s\nECU=%s\n' "${XENVM_CAN_BOOTS:-2}" "${XENVM_CAN_ECU_INDEX:-}" > $RUN/can.env
-  initrd domd $H/domd-init.sh $H/domd-test-can.sh:domd-test.sh $H/isotp_probe.py $H/can_dump.py \
+  # XENVM_CAN_DOMD_TEST / XENVM_CAN_EXTRA: another DomD script and extra files
+  # (xenvm/pi5/rehearse.sh runs the Pi 5 bench driver this way). Unset: run.sh can.
+  initrd domd $H/domd-init.sh ${XENVM_CAN_DOMD_TEST:-$H/domd-test-can.sh}:domd-test.sh $H/isotp_probe.py $H/can_dump.py \
     $H/xs-sock-relay.py $H/domz.cfg $RUN/can.env $OUT/can/vhost-device-can $OUT/can/vhost-device-rng \
-    $OUT/can/xen-vhost-frontend $OUT/zephyr-domz-can.bin:zephyr-domz.bin
+    $OUT/can/xen-vhost-frontend $OUT/zephyr-domz-can.bin:zephyr-domz.bin ${XENVM_CAN_EXTRA:-}
 else
   initrd domd $H/domd-init.sh $H/domd-test.sh $H/doip_probe.py $H/domz.cfg $OUT/qemu-dm $OUT/zephyr-domz.bin
 fi

@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Xaloqi
+//
+// Appended to SoDeV's DomD partial DT (bcm2712-raspberrypi5-domd-vc4.dts) by
+// domd-vc4.bbappend: the Waveshare 2-CH CAN HAT (two MCP2515 on RP1 SPI0) as
+// DomD's can0/can1.
+//
+// No Xen change is needed for this. DomD already owns the whole RP1 peripheral
+// window through the pcie2 xen,reg aperture (host 0x1f_00000000, 16 MiB), and
+// RP1's device interrupts are RP1-internal (its irqchip, then MSI-X through the
+// MIP, whose SPIs 160..223 are DomD's). SPI0 (RP1 +0x50000) and the GPIO bank
+// (RP1 +0xd0000) are inside that window, so these nodes only tell DomD's kernel
+// what is there, like SoDeV's other RP1 nodes ("DESCRIPTIVE only").
+//
+// Values, and where they come from:
+//  - 16 MHz oscillator, can0 = CE0 (GPIO8) + INT GPIO23, can1 = CE1 (GPIO7) +
+//    INT GPIO25: Waveshare's 2-CH CAN HAT wiki ("mcp2515-can0,oscillator=16000000,
+//    interrupt=23", "mcp2515-can1,oscillator=16000000,interrupt=25"). SoDeV's own
+//    bcm2712-raspberrypi5-can-mcp2515.dtso (meta-xt-rpi5, EPAM) has the same.
+//  - SPI0: snps,dw-apb-ssi at RP1 0x50000, RP1 IRQ 19 (0x13), clock RP1_CLK_SYS
+//    (clocks18000 index 0x0c), copied from that dtso.
+//  - No DMA: the dtso's rp1_dma is left out on purpose, so the DesignWare driver
+//    uses PIO. Two CAN controllers at 500 kbit/s do not need DMA, and it keeps
+//    RP1's DMA engine (and its dma-ranges through PCIe) out of the bring-up.
+//  - 10 MHz SPI clock, as in the dtso (the MCP2515's maximum).
+
+&gpiod0000 {
+	xaq_spi0_pins: xaq_spi0_pins {
+		function = "spi0";
+		pins = "gpio9", "gpio10", "gpio11";
+		drive-strength = <12>;
+		bias-disable;
+	};
+	xaq_spi0_cs_pins: xaq_spi0_cs_pins {
+		function = "spi0";
+		pins = "gpio7", "gpio8";
+		bias-pull-up;
+	};
+	xaq_can0_int: xaq_can0_int {
+		function = "gpio";
+		pins = "gpio23";
+		bias-pull-up;
+	};
+	xaq_can1_int: xaq_can1_int {
+		function = "gpio";
+		pins = "gpio25";
+		bias-pull-up;
+	};
+};
+
+// Under /passthrough: dom0less copies only that subtree into DomD's DT.
+&passthrough {
+	xaq_can_osc: xaq-can-osc {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <16000000>;
+	};
+};
+
+&rp1 {
+	xaq_rp1_spi0: spi@c040050000 {
+		compatible = "snps,dw-apb-ssi";
+		reg = <0xc0 0x40050000 0x0 0x130>;
+		interrupts = <0x13 0x4>;
+		clocks = <&clocks18000 0x0c>;
+		clock-names = "ssi_clk";
+		num-cs = <2>;
+		cs-gpios = <&gpiod0000 8 1>, <&gpiod0000 7 1>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&xaq_spi0_pins &xaq_spi0_cs_pins>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		xaq_can0: can@0 {
+			compatible = "microchip,mcp2515";
+			reg = <0>;
+			spi-max-frequency = <10000000>;
+			clocks = <&xaq_can_osc>;
+			interrupt-parent = <&gpiod0000>;
+			interrupts = <23 0x8>;	/* IRQ_TYPE_LEVEL_LOW */
+			pinctrl-names = "default";
+			pinctrl-0 = <&xaq_can0_int>;
+		};
+
+		xaq_can1: can@1 {
+			compatible = "microchip,mcp2515";
+			reg = <1>;
+			spi-max-frequency = <10000000>;
+			clocks = <&xaq_can_osc>;
+			interrupt-parent = <&gpiod0000>;
+			interrupts = <25 0x8>;	/* IRQ_TYPE_LEVEL_LOW */
+			pinctrl-names = "default";
+			pinctrl-0 = <&xaq_can1_int>;
+		};
+	};
+};
