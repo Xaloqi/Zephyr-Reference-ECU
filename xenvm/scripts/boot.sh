@@ -28,7 +28,7 @@ initrd() { # <name> <init> <payload files...>; <src>:<name> installs src as /roo
 }
 initrd dom0 $H/dom0-init.sh $OUT/xs-seed-port
 if [ $VARIANT = can ]; then
-  echo "BOOTS=${XENVM_CAN_BOOTS:-2}" > $RUN/can.env
+  printf 'BOOTS=%s\nECU=%s\n' "${XENVM_CAN_BOOTS:-2}" "${XENVM_CAN_ECU_INDEX:-}" > $RUN/can.env
   initrd domd $H/domd-init.sh $H/domd-test-can.sh:domd-test.sh $H/isotp_probe.py $H/can_dump.py \
     $H/xs-sock-relay.py $H/domz.cfg $RUN/can.env $OUT/can/vhost-device-can $OUT/can/vhost-device-rng \
     $OUT/can/xen-vhost-frontend $OUT/zephyr-domz-can.bin:zephyr-domz.bin
