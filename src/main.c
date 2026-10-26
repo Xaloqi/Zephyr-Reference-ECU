@@ -104,7 +104,15 @@ static uds_status_t s_trng_cb(uint8_t *buf, uint8_t len)
 
 #define DIAG_CAN_DEV         DEVICE_DT_GET(DT_ALIAS(can0))
 #define DIAG_RX_CAN_ID       ((uint32_t)GEN_CAN_RX_ID)   /* 0x7DF */
+#if defined(DIAG_CAN_ECU_INDEX)
+/* ISO 15765-4 ECU #n (CMake DIAG_CAN_ECU_INDEX): request 0x7E0+n, response
+ * 0x7E8+n. Lets two of these ECUs share one bus (see CMakeLists.txt). */
+#define DIAG_TX_CAN_ID       (0x7E8U + (uint32_t)DIAG_CAN_ECU_INDEX)
+#define DIAG_PHYS_RX_CAN_ID  (0x7E0U + (uint32_t)DIAG_CAN_ECU_INDEX)
+#else
 #define DIAG_TX_CAN_ID       ((uint32_t)GEN_CAN_TX_ID)   /* 0x7E8 */
+#define DIAG_PHYS_RX_CAN_ID  (0x7E0U)
+#endif
 
 #ifndef CONFIG_DIAG_TASK_STACK_SIZE
 #define CONFIG_DIAG_TASK_STACK_SIZE   (4096U)
@@ -350,7 +358,7 @@ int main(void)
              * will not treat a functional-only ECU as discoverable (same
              * precedent as EDS's own examples/basic_ecu). See README.md
              * "Phase 3". */
-            .physical_rx_id = 0x7E0U,
+            .physical_rx_id = DIAG_PHYS_RX_CAN_ID,
         };
         status = zephyr_port_init(&port_cfg, &can);
         if (status != UDS_STATUS_OK) {
@@ -453,9 +461,10 @@ int main(void)
     (void)uds_session_register_change_cb(srv->cfg.session_ctx,
                                           s_on_session_change);
 
-    LOG_INF("UDS stack ready: %u DIDs  %u DTCs  RX=0x%03X TX=0x%03X",
+    LOG_INF("UDS stack ready: %u DIDs  %u DTCs  RX=0x%03X TX=0x%03X PHYS=0x%03X",
             (unsigned)GEN_DID_COUNT, (unsigned)GEN_DTC_COUNT,
-            (unsigned)DIAG_RX_CAN_ID, (unsigned)DIAG_TX_CAN_ID);
+            (unsigned)DIAG_RX_CAN_ID, (unsigned)DIAG_TX_CAN_ID,
+            (unsigned)DIAG_PHYS_RX_CAN_ID);
 
 #if defined(DIAG_SECURE_BOOT_BUILD)
     /*

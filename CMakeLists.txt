@@ -135,6 +135,22 @@ if(DIAG_ENTROPY_SEEDS)
     target_compile_definitions(app PRIVATE DIAG_ENTROPY_SEEDS=1)
 endif()
 
+# ---------------------------------------------------------------------------
+# DIAG_CAN_ECU_INDEX — ISO 15765-4 physical address pair of this ECU (CAN build).
+# Unset (the default): the generated response ID (0x7E8) and physical request ID
+# 0x7E0, so every existing image is unchanged. 0..7: request 0x7E0+n, response
+# 0x7E8+n, so two of these ECUs can share one bus (the Pi 5 bench runs the
+# NUCLEO as ECU 0 and the xenvm DomZ as ECU 1). The functional ID 0x7DF stays
+# shared, as ISO 15765-4 intends: each ECU answers it on its own response ID.
+# ---------------------------------------------------------------------------
+set(DIAG_CAN_ECU_INDEX "" CACHE STRING "ISO 15765-4 ECU index 0..7 (empty: generated IDs)")
+if(NOT DIAG_CAN_ECU_INDEX STREQUAL "")
+    if(NOT DIAG_CAN_ECU_INDEX MATCHES "^[0-7]$")
+        message(FATAL_ERROR "DIAG_CAN_ECU_INDEX must be 0..7, got '${DIAG_CAN_ECU_INDEX}'")
+    endif()
+    target_compile_definitions(app PRIVATE DIAG_CAN_ECU_INDEX=${DIAG_CAN_ECU_INDEX}U)
+endif()
+
 if(NOT DIAG_SKIP_CODEGEN AND NOT EXISTS "${DIAG_ROOT}/tools/templates")
     message(STATUS
         "[REF-ECU] Commercial tools/templates/ not present (expected — this "
