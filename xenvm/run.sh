@@ -32,7 +32,7 @@ mkdir -p "$BUILD"
 BUILD=$(cd "$BUILD" && pwd)
 
 in_container() { # runs as root inside; files are handed back to the caller's uid
-  docker run --rm -v "$REPO":/src:ro -v "$BUILD":/build -e XENVM_BOOT_TIMEOUT -e XENVM_CAN_BOOTS \
+  docker run --rm -v "$REPO":/src:ro -v "$BUILD":/build -e XENVM_BOOT_TIMEOUT -e XENVM_CAN_BOOTS -e XENVM_CAN_ECU_INDEX \
     "${2:-$IMAGE}" bash -c "$1; rc=\$?; chown -R $(id -u):$(id -g) /build; exit \$rc"
 }
 
@@ -54,6 +54,7 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
 fi
 
 if [ $VARIANT = can ]; then
+  case "${XENVM_CAN_ECU_INDEX:-}" in ""|[0-7]) ;; *) echo "XENVM_CAN_ECU_INDEX must be 0..7"; exit 2 ;; esac
   # A second image on top of the builder: the Rust toolchain for DomD's backends.
   CAN_IMAGE=xaloqi-zre-xenvm-can:1
   if ! docker image inspect "$CAN_IMAGE" >/dev/null 2>&1; then
@@ -67,7 +68,7 @@ if [ $VARIANT = can ]; then
   # Both images must match the pins and sources now, as for DoIP. Same
   # computations as app_hash_can and backends_hash in scripts/build-can.sh.
   APP=$(cd "$REPO" && cat prj.conf CMakeLists.txt boards/xenvm_can.conf boards/xenvm_can.overlay src/*.c src/*.h | sha256sum | cut -c1-16)
-  WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV app=$APP"
+  WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX} app=$APP"
   HAVE=$(cat "$BUILD/out/zephyr-domz-can.stamp" 2>/dev/null || echo "none (no CAN image built)")
   if [ "$HAVE" != "$WANT" ]; then
     echo "FAIL: CAN DomZ image was built from [$HAVE], pins and sources are [$WANT]; run xenvm/run.sh can (not boot) to rebuild"

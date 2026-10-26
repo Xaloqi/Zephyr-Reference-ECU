@@ -33,7 +33,7 @@ manifest:
     # Zephyr module: the DoIP image has no virtio-can node and does not build it.
     - name: zephyr-virtio-can
       remote: xaloqi
-      revision: 0c7af59d7e7885a0c36ad19f85ebb90881b357a0   # v0.1.0
+      revision: 2762ab77f17116ed3213bc995a3ffb287a369369   # v0.2.0
       path: modules/zephyr-virtio-can
 
   self:
