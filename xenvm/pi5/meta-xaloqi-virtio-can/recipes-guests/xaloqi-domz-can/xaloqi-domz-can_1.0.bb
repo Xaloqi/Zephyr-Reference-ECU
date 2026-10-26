@@ -45,4 +45,4 @@ FILES:${PN} = "/usr/lib/xen/boot/zephyr-domz-can.bin ${libexecdir}/xaloqi-can ${
 INSANE_SKIP:${PN} += "arch already-stripped"
 
 RDEPENDS:${PN} = "python3-core python3-io can-utils iproute2 \
-                  vhost-device-can vhost-device-rng xen-vhost-frontend"
+                  xaloqi-vhost-device-can xaloqi-vhost-device-rng xen-vhost-frontend"
