@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "xaloqi-eds": {
+      "command": "python3",
+      "args": ["${XALOQI_EDS_ROOT}/tools/mcp_server.py"]
+    }
+  }
+}
