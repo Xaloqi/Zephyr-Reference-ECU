@@ -5,7 +5,7 @@
  *
  * ECU       : ReferenceBCM
  * Version   : 0.1.0
- * Generated : 2026-10-13T20:48:00Z
+ * Generated : 2026-10-30T16:07:42Z
  *
  * PURPOSE: Generated UDS stack initialisation. Wires all sub-modules together
  *          using timing constants and database entries derived from YAML.
@@ -58,6 +58,7 @@
 #include "uds_security_nvm.h"
 #include "uds_safety.h"
 #include "uds_comm_control.h"
+#include "uds_periodic.h"
 #include "uds_types.h"
 #include "services.h"
 #include "did_handlers.h"
@@ -208,7 +209,7 @@ uds_status_t uds_generated_init(
      * Soft-degrade: if NVM is not ready (e.g. first boot or NVM subsystem
      * failure), dtc_mirror_load() returns UDS_STATUS_ERR_NOT_INITIALIZED and
      * this is treated as non-fatal — the stack boots with all DTC status
-     * bytes cleared to 0x00.
+     * bytes at their registration value, 0x50 (EDS#462).
      *
      * TRACEABILITY: REQ-DTC-NVM-01
      */
@@ -242,14 +243,15 @@ uds_status_t uds_generated_init(
      * Populates the DTC database with entries from diagnostics_config.yaml.
      * String literals are in ROM — pointer storage in dtc_entry_t is safe.
      *
-     * Severity encoding (SAE J2012-DA):
-     *   0x20 = check_at_next_halt
-     *   0x40 = maintenance_only
+     * Severity: the DTCSeverity byte, ISO 14229-1:2013 Annex D.3 (EDS#145):
+     *   bits 7-5 = 0x20 maintenance_only, 0x40 check_at_next_halt,
+     *   0x80 check_immediately; bit 0 = DTCClass_0 (unclassified).
+     *   Mapped by tools/codegen.py _DTC_SEVERITY_BYTES.
      */
     {
         status = dtc_database_register(
             (uint32_t)266340UL,
-            (uint8_t)0x20U,
+            (uint8_t)0x41U,
             "Door ajar timeout — a door reported open while the body controller is in the locked state, continuously, past the monitor's grace period"
         );
         if (status != UDS_STATUS_OK) {
@@ -258,7 +260,7 @@ uds_status_t uds_generated_init(
 
         status = dtc_database_register(
             (uint32_t)266597UL,
-            (uint8_t)0x40U,
+            (uint8_t)0x21U,
             "Window actuation stall — a commanded window position was not reached within the actuator's expected travel time"
         );
         if (status != UDS_STATUS_OK) {
@@ -270,7 +272,8 @@ uds_status_t uds_generated_init(
     /* ── Step 5.5: Restore DTC status bytes from NVM ──────────────────────────
      *
      * Reads the NVM-backed DTC mirror and restores each persisted status byte
-     * into the live dtc_database via dtc_database_set_status().
+     * into the live dtc_database via dtc_database_restore_status(), which
+     * ControlDTCSetting does not gate (EDS#462).
      *
      * MUST be called after all DTCs have been registered (Step 5) so that
      * the mirror loader can match persisted codes against the live table.
@@ -281,7 +284,7 @@ uds_status_t uds_generated_init(
      * Soft-degrade behaviour:
      *   UDS_STATUS_ERR_NOT_INITIALIZED  → NVM not ready (first boot or NVM
      *     subsystem failure). Treated as non-fatal: stack continues with all
-     *     DTC status bytes at 0x00.
+     *     DTC status bytes at 0x50 (testNotCompleted, as registered).
      *   UDS_STATUS_ERR_PLATFORM         → NVM read error. Non-fatal: same
      *     degraded behaviour as first boot.
      *   UDS_STATUS_ERR_NVM_DATA_CORRUPT → the persisted mirror record failed
@@ -289,7 +292,7 @@ uds_status_t uds_generated_init(
      *     Deliberately treated the same as "mirror absent" rather than as a
      *     fatal boot error: the blast radius of trusting nothing from a
      *     corrupt record is identical to the NOT_INITIALIZED case (DTC
-     *     history is lost, all status bytes stay at 0x00), which is the same
+     *     history is lost, all status bytes stay at 0x50), which is the same
      *     blast radius the original DTC-history-loss defect had. Aborting
      *     uds_stack_init() over it would let a corrupted NVM record take down
      *     the entire diagnostic stack, a materially larger failure than the
@@ -309,7 +312,7 @@ uds_status_t uds_generated_init(
         }
         /* Soft-degrade: NOT_INITIALIZED, PLATFORM, and NVM_DATA_CORRUPT
          * errors are all non-fatal — the corrupted/unavailable mirror is
-         * discarded and boot continues with default (0x00) DTC status. */
+         * discarded and boot continues with default (0x50) DTC status. */
     }
 
     /* ── Step 5.6: Register generated routine handlers ──────────────────────
@@ -534,7 +537,13 @@ uds_status_t uds_generated_init(
      * Binds the ISO 15765-2 framing layer to the CAN transport.
      * block_size = 0: no block size limit (tester decides segmentation pace).
      * stmin_ms   = 0: no minimum separation time enforced by this ECU.
+     * functional_rx_can_id: GEN_CAN_FUNCTIONAL_RX_ID, 0 when the YAML turns
+     *              functional addressing off.
+     * periodic_tx_can_id: GEN_CAN_PERIODIC_TX_ID, 0 when the YAML sets none
+     *              (SID 0x2A then answers 0x22). [EDS#546]
      */
+    uds_periodic_set_tx_can_id((uint32_t)GEN_CAN_PERIODIC_TX_ID);
+
 #ifndef EDS_DOIP_ONLY_BUILD
     if (can != NULL) {
         isotp_cfg_t isotp_cfg;
@@ -542,6 +551,10 @@ uds_status_t uds_generated_init(
 
         isotp_cfg.rx_can_id  = rx_can_id;
         isotp_cfg.tx_can_id  = tx_can_id;
+        /* Functional requests (ISO 15765-4): 0 = none. [EDS-toolchain#165] */
+        isotp_cfg.functional_rx_can_id = (uint32_t)GEN_CAN_FUNCTIONAL_RX_ID;
+        /* SID 0x2A periodic messages: UUDT on their own ID, 0 = none. [EDS#546] */
+        isotp_cfg.periodic_tx_can_id   = (uint32_t)GEN_CAN_PERIODIC_TX_ID;
         isotp_cfg.block_size = (uint8_t)ISOTP_DEFAULT_BLOCK_SIZE;
         isotp_cfg.stmin_ms   = (uint8_t)ISOTP_DEFAULT_STMIN_MS;
         isotp_cfg.can        = can;

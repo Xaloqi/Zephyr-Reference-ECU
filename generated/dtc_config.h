@@ -5,7 +5,7 @@
  *
  * ECU       : ReferenceBCM
  * Version   : 0.1.0
- * Generated : 2026-10-13T20:48:00Z
+ * Generated : 2026-10-30T16:07:42Z
  *
  * PURPOSE: Per-example DTC table, exposed as an X-macro list so any
  *          translation unit that already links against this example's
@@ -50,11 +50,12 @@
 
 /*
  * X-macro list of this example's DTCs: (code, severity byte, description).
- * Severity encoding (SAE J2012-DA): 0x20 = check_at_next_halt, 0x40 = other.
+ * Severity byte: ISO 14229-1:2013 Annex D.3 (tools/codegen.py
+ * _DTC_SEVERITY_BYTES, EDS#145): e.g. 0x41 = check_at_next_halt.
  * Invoke as GEN_DTC_TABLE(X) with X(code, severity, desc) defined by the
  * caller; #undef X immediately after use.
  */
 #define GEN_DTC_TABLE(X) \
-    X((uint32_t)266340UL, (uint8_t)0x20U, "Door ajar timeout — a door reported open while the body controller is in the locked state, continuously, past the monitor's grace period") \
-    X((uint32_t)266597UL, (uint8_t)0x40U, "Window actuation stall — a commanded window position was not reached within the actuator's expected travel time")
+    X((uint32_t)266340UL, (uint8_t)0x41U, "Door ajar timeout — a door reported open while the body controller is in the locked state, continuously, past the monitor's grace period") \
+    X((uint32_t)266597UL, (uint8_t)0x21U, "Window actuation stall — a commanded window position was not reached within the actuator's expected travel time")
 #endif /* DTC_CONFIG_H */
