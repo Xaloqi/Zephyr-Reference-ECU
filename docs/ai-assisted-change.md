@@ -3,10 +3,20 @@ The EDS MCP server (`tools/mcp_server.py`) ships in the EDS commercial toolchain
 # An AI-assisted change, end to end
 
 This page walks through one change to this ECU made from Claude Code with the EDS
-MCP server: two new DIDs, from a YAML scaffold to a read on a real CAN bus. Every
-output quoted here came from a real run on 2026-10-27 (EDS v1.25.0, NUCLEO-H753ZI).
-The change itself is **not** in this repo; this page describes it so you can make
-your own.
+MCP server: two new DIDs, from a YAML scaffold to a read on a real CAN bus. The change
+itself is **not** in this repo; this page describes it so you can make your own.
+
+Where the output comes from (EDS v1.26.1, the version `west.yml` pins):
+
+- **Tool calls, campaign, build:** re-run on 2026-10-30 on EDS v1.26.1 with the v1.26.1
+  Developer ZIP unzipped over the tag, `xaloqi-tester` 1.5.10 and a NUCLEO-H753ZI build.
+  The tools were called directly over MCP stdio (they are deterministic and call no
+  model), so the output is what the server returns.
+- **Two caught failures** (the write-security rejection and the default-session write) are
+  quoted exactly as captured on 2026-10-27 on EDS v1.25.0. Both checks still fire on
+  v1.26.1 with the same messages.
+- **Frames on real CAN** are from the 2026-10-27 run on v1.25.0 firmware and were **not**
+  re-captured (see step 6).
 
 The MCP server gives the AI assistant four tools. None of them calls a model, and none
 of them edits your files:
@@ -14,7 +24,7 @@ of them edits your files:
 | Tool | Does |
 |---|---|
 | `generate_did_config` | Returns a `diagnostics_config.yaml` scaffold for the DIDs you describe |
-| `validate_asil_b` | Runs `codegen.py --dry-run` at ASIL-B on YAML text and returns violations |
+| `validate_asil_b` | Runs `codegen.py --dry-run` at ASIL-B on a config file (or on YAML text) and returns violations |
 | `run_codegen` | Runs `codegen.py` on a config file and writes `generated/` |
 | `explain_uds_error` | Explains an NRC in terms of the EDS check that returns it |
 
@@ -24,7 +34,7 @@ they reach C, and the run below shows several.
 
 ## Setup
 
-1. **EDS at the version `west.yml` pins** (v1.25.0 at the time of writing), with the
+1. **EDS at the version `west.yml` pins** (v1.26.1 at the time of writing), with the
    Developer ZIP of the same version unzipped over it, as EDS's `INSTALL.md` describes.
    `mcp_server.py` calls the `tools/codegen.py` next to it, so it does not run from the
    ZIP alone.
@@ -43,16 +53,39 @@ they reach C, and the run below shows several.
 ## The change
 
 - `BCM_BatteryVoltage_mV` (0x0413, uint16): supply voltage, simulated in
-  `src/bcm_state.c`.
+  `src/bcm_state.c`. **Read-only** over UDS: the application owns the value
+  (`source: app`).
 - `BCM_InteriorLightTimeout_s` (0x0414, uint8): a calibration value, writable in the
   extended session.
 
 ### 1. Scaffold, then merge by hand
 
-`generate_did_config` with both DIDs returns a complete scaffold: `metadata`, `timing`,
-the two `dids` entries, and empty `dtcs`/`routines`. It is not a drop-in replacement
-for this repo's file (no `schema_version`, no `can:` block). Copy only the two `dids`
-entries into `diagnostics_config.yaml`, after `BCM_DoorCycleCount`.
+`generate_did_config` with both DIDs returns a complete scaffold: `schema_version`,
+`metadata`, `timing`, the two `dids` entries, and empty `dtcs`/`routines`. A DID passed
+with `source: app` comes back marked, with a header naming the function the application
+must define:
+
+```yaml
+# Application-owned DIDs (source: app). codegen generates no body for
+# these; define them in application code (prototypes in generated/
+# did_handlers.h). A missing one is a link error:
+#   did_read_bcm_batteryvoltage_mv()
+...
+  - id:   "0x0413"
+    name: "BCM_BatteryVoltage_mV"
+    access:
+      - read
+    min_session:          "extended"
+    read_security_level:  0
+    write_security_level: 0
+    data_length:          2
+    source:               app
+```
+
+The scaffold is still not a drop-in replacement for this repo's file: its `can:` block is
+a commented reminder (the IDs have no default, because 0x7DF is the functional broadcast
+ID), and the repo has its own. Copy only the two `dids` entries into
+`diagnostics_config.yaml`, after `BCM_DoorCycleCount`.
 
 ### 2. Validate: the write-security rejection
 
@@ -63,36 +96,61 @@ working, the run deliberately set it to 0 on 0x0414. `validate_asil_b` rejected 
 [codegen] ERROR: SAFETY [HIGH-1]: dids[7] (id='0x0414') 'BCM_InteriorLightTimeout_s' has write access but write_security_level=0.  ASIL-B policy (ISO 26262-6) requires that every write-capable DID is protected by a SecurityAccess challenge. FIX: set write_security_level >= 1 in diagnostics_config.yaml for this DID. ...
 ```
 
-With `write_security_level: 1` it returns `"valid": true`.
+EDS v1.26.1 returns the same check, for the same DID (`dids[7]`). With
+`write_security_level: 1` it returns:
 
-### 3. A read-only DID the app owns needs `write` (for now)
+```json
+{
+  "valid": true,
+  "violations": [],
+  "warnings": ["[codegen] WARN: ASIL-B safety validation active."],
+  "config_path": ".../diagnostics_config.yaml",
+  "config_sha256": "309a7b99ac19eee86c0e37e6b985c65e3bb6845b6096667263f0c84f1fab5392"
+}
+```
 
-The app sets a DID's value only through the generated `did_write_<name>()`, and that
-function exists only for DIDs with `write` access. So `BCM_BatteryVoltage_mV` follows
-the same pattern as `BCM_DoorCycleCount`: `access: [read, write]`,
-`write_security_level: 1`, so a tester without the key cannot overwrite it
-([EDS-toolchain#201](https://github.com/Xaloqi/EDS-toolchain/issues/201)).
+Pass `config_path` rather than the YAML text: the assistant no longer re-types the file
+(it used to lose characters in comment lines), and `config_sha256` lets you check that
+the file validated is the file you meant. The banner is in `warnings`; `violations` holds
+only real violations.
 
-That exposed a second check. A writable DID in `min_session: "default"` is rejected,
-because 0x2E is refused in the default session:
+### 3. A read-only DID the app owns: `source: app`
+
+`BCM_BatteryVoltage_mV` is a value the application computes and a tester must not
+overwrite. Declare it `source: app` with `access: [read]`:
+
+```yaml
+  - id:   "0x0413"
+    name: "BCM_BatteryVoltage_mV"
+    source: app
+    access:
+      - read
+    min_session:          "extended"
+    read_security_level:  0
+    write_security_level: 0
+    data_length:          2
+```
+
+codegen then emits only the prototype `did_read_bcm_batteryvoltage_mv()` and the safety
+wrapper for it: no backing store and **no `did_write_bcm_batteryvoltage_mv()`**. The
+application defines the read function (step 5); forgetting it is a link error, and a
+tester's write to the DID is refused. (On v1.25.0 the only way to set a DID's value from
+the application was the generated `did_write_*()`, which exists only for writable DIDs,
+so this DID had to be `[read, write]` with a security level
+([EDS-toolchain#201](https://github.com/Xaloqi/EDS-toolchain/issues/201), fixed).)
+
+The calibration DID is the opposite case: a value the tester writes. A writable DID in
+`min_session: "default"` is rejected, because 0x2E is refused in the default session. This
+check was caught on 2026-10-27, on v1.25.0, while 0x0413 was still writable (hence
+`dids[6]`); the same message comes back on v1.26.1 for any writable DID left in `default`:
 
 ```
 [codegen] ERROR: VALIDATION: dids[6]: DID has write access with min_session 'default', but WriteDataByIdentifier (0x2E) is only accepted in a non-default session (core/uds_access_table.c), so this DID can never be written. FIX: set min_session to 'extended' (or 'programming').
 ```
 
-Both DIDs end up in `extended`:
+Both DIDs end up in `extended`; the calibration DID is writable with a security level:
 
 ```yaml
-  - id:   "0x0413"
-    name: "BCM_BatteryVoltage_mV"
-    access:
-      - read
-      - write
-    min_session:          "extended"
-    read_security_level:  0
-    write_security_level: 1
-    data_length:          2
-
   - id:   "0x0414"
     name: "BCM_InteriorLightTimeout_s"
     access:
@@ -106,11 +164,27 @@ Both DIDs end up in `extended`:
 
 ### 4. Generate, and put the hooks back
 
-`run_codegen` writes all 11 files in `generated/`. With EDS v1.25.0, pass
-`config_path` and `output_dir` **relative to `XALOQI_EDS_ROOT`** (for example
-`../Zephyr-Reference-ECU/generated`). With absolute paths outside the EDS tree, the tool
-writes the files and then returns an error
-([EDS-toolchain#200](https://github.com/Xaloqi/EDS-toolchain/issues/200)).
+`run_codegen` writes all 11 files in `generated/`. Absolute paths work for `config_path`
+and `output_dir`, as do paths relative to `XALOQI_EDS_ROOT`:
+
+```json
+{
+  "success": true,
+  "output_files": [".../generated/did_handlers.c", ".../generated/did_handlers.h",
+                   ".../generated/did_safety_wrappers.c", ".../generated/did_safety_wrappers.h",
+                   ".../generated/dtc_config.h", ".../generated/generated_config.h",
+                   ".../generated/routine_handlers.c", ".../generated/routine_handlers.h",
+                   ".../generated/safety_config.h", ".../generated/uds_init.c",
+                   ".../generated/uds_init.h"],
+  "returncode": 0
+}
+```
+
+(On v1.25.0 an absolute path outside the EDS tree wrote the files and then returned an
+error, [EDS-toolchain#200](https://github.com/Xaloqi/EDS-toolchain/issues/200), fixed.)
+The result's `stdout` also carries codegen's licence banner line, which names the
+licensee: leave it out when you paste a transcript
+([EDS-toolchain#227](https://github.com/Xaloqi/EDS-toolchain/issues/227)).
 
 Regenerating replaces `generated/routine_handlers.c`'s four `[APP HOOK]` bodies with
 TODO stubs. The configure-time check catches it:
@@ -123,34 +197,59 @@ CMake Error at CMakeLists.txt:201 (message):
 
 Reapply the four bodies documented in `src/bcm_state.h`
 (see [README](../README.md) "The one hand-edited `generated/` file"). This change
-touched no routines: the regenerated file differed from a regeneration of the
-unchanged YAML only in its timestamp. So restoring the committed file
-(`git checkout -- generated/routine_handlers.c`) was the same as reapplying the bodies.
+touched no routines: on v1.26.1 the regenerated file is identical, apart from its
+timestamp, to a regeneration of the unchanged YAML. So restoring the committed file
+(`git checkout -- generated/routine_handlers.c`) is the same as reapplying the bodies.
 If you change routines, reapply the bodies by hand onto the new file.
+
+One more thing to expect: the files committed here were generated by an earlier EDS, so
+regenerating on v1.26.1 also brings in template changes unrelated to your DIDs (for
+example `uds_init.c`). To keep your diff reviewable, regenerate the unchanged YAML first
+and commit that on its own.
 
 ### 5. The app side
 
 In `src/bcm_state.c`, beside `bcm_push_door_cycle_count()`:
 
-- push a simulated voltage on every monitor tick with `did_write_bcm_batteryvoltage_mv()`
-  (a 12500–12700 mV triangle wave in the run);
+- **define `did_read_bcm_batteryvoltage_mv()`**: it returns a simulated supply, a
+  12500–12700 mV triangle wave stepped on every monitor tick (two bytes, big-endian);
 - seed the timeout once at init with `did_write_bcm_interiorlighttimeout_s()` (30 s).
 
-The NUCLEO build then succeeds with no warnings from `src/` or `generated/`.
+The NUCLEO build (`nucleo_h753zi`, EDS v1.26.1) then succeeds, FLASH 111,948 B (5.34 %),
+RAM 59,460 B (11.34 %), with no warnings from `src/` or `generated/` (only the vendor HAL's
+`-Wundef`, as before).
 
 ### 6. Prove it
 
-**Free virtual campaign.** Add the two DIDs to `campaigns/reference_bcm.yaml` (write,
-read back, assert). The run passed 25/25 on `xaloqi-tester` 1.5.8. Do not put a
-"write refused without SecurityAccess" step in the virtual job: the free virtual ECU
-accepts the write ([TestLab#93](https://github.com/Xaloqi/TestLab/issues/93)), and
-the step fails there:
+**Free virtual campaign.** Add the calibration DID to `campaigns/reference_bcm.yaml`:
+a write **before** SecurityAccess that must be refused with NRC 0x33, then after the key a
+write, a read back and an assert. The run on `xaloqi-tester` 1.5.10 passed **23/23**:
 
 ```
-[03/26] write_did(0x0414)  → FAIL  Expected NRC 0x33 but step produced a positive response
+  [03/23] write_did(0x0414)                  → OK           (0 ms)    # expect_nrc: 0x33
+  [04/23] security_access(level=1)           → OK           (22 ms)
+  ...
+  [12/23] write_did(0x0414)                  → OK           (0 ms)
+  [13/23] read_did(0x0414)                   → OK           (0 ms)
+  [14/23] assert                             → OK           (0 ms)
 ```
 
-**Real CAN.** After flashing, the boot log reports `UDS stack ready: 9 DIDs  2 DTCs`.
+The refused write belongs in this job. Until `xaloqi-tester` 1.5.9 the free virtual ECU
+accepted that write, and the step failed with `Expected NRC 0x33 but step produced a
+positive response` ([TestLab#93](https://github.com/Xaloqi/TestLab/issues/93), fixed in
+TestLab#97). The same campaign on 1.5.8 still fails exactly there; on 1.5.9 and 1.5.10 it
+passes.
+
+`BCM_BatteryVoltage_mV` is not in the virtual campaign. The free virtual ECU is a small
+built-in simulator, not an interpreter of `diagnostics_config.yaml`: it knows a DID outside
+its own four only after a write, and a write is exactly what this read-only DID refuses on
+the real ECU. Its behaviour is shown by codegen (no `did_write_*()` exists) and by the
+frames below.
+
+**Real CAN.** These frames are from the 2026-10-27 run on v1.25.0 firmware, where
+0x0413 was still a writable DID fed by `did_write_*()`; they were not re-captured with the
+read-only build above. Nothing here writes 0x0413, and its read path (session, value,
+range) is the one shown. After flashing, the boot log reports `UDS stack ready: 9 DIDs  2 DTCs`.
 From the host (CANable2, ECU on physical 0x7E0/0x7E8), frames as observed:
 
 ```
@@ -167,20 +266,37 @@ From the host (CANable2, ECU on physical 0x7E0/0x7E8), frames as observed:
 
 ### 7. Ask about the NRCs you saw
 
-`explain_uds_error` on 0x33 gave the right cause (security level not unlocked). On 0x31
-it gave "DID not found in the database", which is wrong here: 0x0413 is registered, and
-the read was refused because the default session is below the DID's `min_session`.
-Since EDS v1.20.0 ([EDS#465](https://github.com/Xaloqi/EDS/issues/465)), ReadDataByIdentifier returns 0x31 in that case
-([EDS-toolchain#202](https://github.com/Xaloqi/EDS-toolchain/issues/202)). Check the
-session before you regenerate anything.
+`explain_uds_error` on 0x33 (answering 0x2E) gives the right cause: the DID's security
+level is above 0 and not unlocked, with a pointer not to lower `write_security_level` to
+dodge it. On 0x31 (answering 0x22) it now says:
 
-## Known rough edges (EDS v1.25.0)
+```
+NRC 0x31 — requestOutOfRange (answering 0x22 ReadDataByIdentifier)
 
-- `validate_asil_b` takes YAML as text, so the assistant re-types the file into the call.
-  In the run the copy lost characters in comment lines on every call
-  ([EDS-toolchain#199](https://github.com/Xaloqi/EDS-toolchain/issues/199)). Its
-  `violations` list also includes a banner and a `WARN:` line
-  ([EDS-toolchain#198](https://github.com/Xaloqi/EDS-toolchain/issues/198)). Treat
-  only `[codegen] ERROR:` lines as violations.
-- The rest are covered above: #200 (use relative paths), #201 (read-only app-owned DIDs),
-  #202 (0x31), TestLab#93 (virtual write gating).
+Cause in EDS:
+  - [0x22] The DID is not supported in the active session: unknown, not readable, or the
+    active session is below its min_session (EDS#465). ...
+
+How to fix: Check the session first: is the active session at least the DID's or RID's
+min_session (0x10 0x03 for extended)? Only then check that the ID is in
+diagnostics_config.yaml and the firmware was rebuilt from it, ...
+```
+
+That is the cause here: 0x0413 is registered, and the default session is below its
+`min_session`. (On v1.25.0 the same call answered "DID not found in the database", which
+sent the reader to the wrong place, [EDS-toolchain#202](https://github.com/Xaloqi/EDS-toolchain/issues/202), fixed.)
+
+## Known rough edges (EDS v1.26.1)
+
+- **The scaffold is a starting point, not a patch.** Merge its `dids` entries by hand; its
+  `can:` block is a reminder to fill in, not a value.
+- **Regeneration replaces the `[APP HOOK]` bodies** in `generated/routine_handlers.c`. The
+  CMake check stops the build if they are gone; restore the file or reapply the bodies
+  (step 4).
+- **Regenerating on a newer EDS changes more than your DIDs**, because the committed files
+  come from an earlier version. Commit a regeneration of the unchanged YAML first.
+- **`run_codegen`'s `stdout` names the licensee** ([EDS-toolchain#227](https://github.com/Xaloqi/EDS-toolchain/issues/227)).
+  Strip the `License :` line before you share a transcript.
+- **The free virtual ECU does not model your config.** It knows its own DIDs and creates
+  others on write, so it cannot hold a read-only app-owned DID; use it for write gating
+  and round trips on writable DIDs, and real CAN for the rest.
