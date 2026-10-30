@@ -5,7 +5,7 @@
  *
  * ECU       : ReferenceBCM
  * Version   : 0.1.0
- * Generated : 2026-10-13T20:47:59Z
+ * Generated : 2026-10-30T16:07:42Z
  *
  * PURPOSE: Compile-time constants derived from diagnostics_config.yaml.
  *          Provides all protocol timing parameters, CAN addressing, and
@@ -65,11 +65,30 @@
  * CAN transport addressing
  *
  * Derived from the 'can' section of diagnostics_config.yaml.
- * Defaults: 0x7DF (ISO 15765-4 functional RX), 0x7E8 (physical TX ECU #0).
+ * Defaults: 0x7E0 (physical RX, ECU #0), 0x7E8 (physical TX, ECU #0),
+ * 0x7DF (functional RX, ISO 15765-4).
  * -------------------------------------------------------------------------- */
 
-/** CAN ID on which the ECU listens for UDS diagnostic requests. */
+/** CAN ID on which the ECU listens for physically addressed UDS requests. */
 #define GEN_CAN_RX_ID             (2015U)   /* 0x7DF */
+
+/**
+ * CAN ID of functionally addressed requests (ISO 15765-4), or 0 for none.
+ * Set in isotp_cfg_t.functional_rx_can_id by uds_init.c. The application's
+ * ISO-TP rx callback passes isotp_get_rx_addressing() on to
+ * uds_server_process_request_ex(), and its CAN filter must accept this ID.
+ */
+#define GEN_CAN_FUNCTIONAL_RX_ID  (0U)   /* none */
+
+/**
+ * CAN ID of the periodic data response messages of SID 0x2A, or 0 for none
+ * (EDS#546). ISO 14229-3:2022 Table 3: periodic messages use a CAN ID of their
+ * own (an unsegmented [pDID, data] frame, no PCI, no SID); there is no default.
+ * Set in isotp_cfg_t.periodic_tx_can_id and uds_periodic_set_tx_can_id() by
+ * uds_init.c; with 0, SID 0x2A answers NRC 0x22 to a subscription.
+ * codegen refuses a 0xF2xx DID in a config without it.
+ */
+#define GEN_CAN_PERIODIC_TX_ID    (0U)   /* none */
 
 /** CAN ID on which the ECU transmits UDS diagnostic responses. */
 #define GEN_CAN_TX_ID             (2024U)   /* 0x7E8 */
@@ -102,6 +121,6 @@
 
 #define GEN_ECU_NAME            "ReferenceBCM"
 #define GEN_ECU_VERSION         "0.1.0"
-#define GEN_GENERATED_TIMESTAMP "2026-10-13T20:47:59Z"
+#define GEN_GENERATED_TIMESTAMP "2026-10-30T16:07:42Z"
 
 #endif /* GENERATED_CONFIG_H */

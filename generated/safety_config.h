@@ -5,7 +5,7 @@
  *
  * ECU       : ReferenceBCM
  * Version   : 0.1.0
- * Generated : 2026-10-13T20:48:00Z
+ * Generated : 2026-10-30T16:07:42Z
  * ASIL Level: B
  *
  * PURPOSE: Compile-time ASIL safety configuration constants.
@@ -40,7 +40,7 @@
 #ifndef SAFETY_CONFIG_H
 #define SAFETY_CONFIG_H
 
-#define UDS_STACK_VERSION "1.18.1"
+#define UDS_STACK_VERSION "1.26.1"
 
 /* =============================================================================
  * ASIL level identification
