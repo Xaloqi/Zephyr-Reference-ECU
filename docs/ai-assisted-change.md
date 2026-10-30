@@ -15,8 +15,7 @@ Where the output comes from (EDS v1.26.1, the version `west.yml` pins):
 - **Two caught failures** (the write-security rejection and the default-session write) are
   quoted exactly as captured on 2026-10-27 on EDS v1.25.0. Both checks still fire on
   v1.26.1 with the same messages.
-- **Frames on real CAN** are from the 2026-10-27 run on v1.25.0 firmware and were **not**
-  re-captured (see step 6).
+- **Frames on real CAN:** captured on 2026-10-30 on EDS v1.26.1 firmware (step 6).
 
 The MCP server gives the AI assistant four tools. None of them calls a model, and none
 of them edits your files:
@@ -246,23 +245,31 @@ its own four only after a write, and a write is exactly what this read-only DID 
 the real ECU. Its behaviour is shown by codegen (no `did_write_*()` exists) and by the
 frames below.
 
-**Real CAN.** These frames are from the 2026-10-27 run on v1.25.0 firmware, where
-0x0413 was still a writable DID fed by `did_write_*()`; they were not re-captured with the
-read-only build above. Nothing here writes 0x0413, and its read path (session, value,
-range) is the one shown. After flashing, the boot log reports `UDS stack ready: 9 DIDs  2 DTCs`.
+**Real CAN.** Captured on 2026-10-30 on a NUCLEO-H753ZI running this change on **EDS
+v1.26.1**: the demo build (both DIDs, `0x0413` as `source: app`) on top of a regeneration of
+the unchanged YAML. After flashing, the boot log reports `UDS stack ready: 9 DIDs  2 DTCs`.
 From the host (CANable2, ECU on physical 0x7E0/0x7E8), frames as observed:
 
 ```
 7E0#03220413CCCCCCCC   7E8#037F2231            read 0x0413, default session → 0x31
 7E0#021003CCCCCCCCCC   7E8#065003001901F4      extended session
-7E0#03220413CCCCCCCC   7E8#056204133138        12600 mV
-7E0#03220413CCCCCCCC   7E8#0562041330D4        12500 mV, 350 ms later
-7E0#03220414CCCCCCCC   7E8#046204141E          30 s
-7E0#042E04143CCCCCCC   7E8#037F2E33            write before SecurityAccess → 0x33
-   ... 27 01 / 27 02 ...                       SecurityAccess level 1
-7E0#042E04143CCCCCCC   7E8#036E0414            write accepted
-7E0#03220414CCCCCCCC   7E8#046204143C          60 s
+7E0#03220413CCCCCCCC   7E8#05620413319C        12700 mV
+7E0#03220413CCCCCCCC   7E8#056204133138        12600 mV, 350 ms later
+7E0#03220414CCCCCCCC   7E8#046204141E          read 0x0414: 30 s (seeded at init)
+7E0#042E04143CCCCCCC   7E8#037F2E33            write 0x0414 before SecurityAccess → 0x33
+7E0#052E04133138CCCC   7E8#037F2E33            write 0x0413 before SecurityAccess → 0x33
+   ... 27 01 / 27 02 ...                       SecurityAccess level 1 (seed and key not shown)
+7E0#042E04143CCCCCCC   7E8#036E0414            write 0x0414 accepted
+7E0#03220414CCCCCCCC   7E8#046204143C          read 0x0414: 60 s
+7E0#052E04133138CCCC   7E8#037F2E31            write 0x0413 after SecurityAccess → 0x31
+7E0#03220413CCCCCCCC   7E8#056204133183        12675 mV, value unchanged by the write
 ```
+
+The read-only DID refuses a write in both states, with a different NRC. Before the
+unlock, 0x33 comes from the service: 0x2E needs SecurityAccess level 1 whatever the DID
+(`core/uds_access_table.c`). After it, 0x31 is the DID itself: it has no write access, so no
+`did_write_*()` exists. The voltage keeps its triangle wave (12500-12700 mV, stepped by
+the application), which is why the three reads differ.
 
 ### 7. Ask about the NRCs you saw
 
