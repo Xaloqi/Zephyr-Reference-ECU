@@ -82,21 +82,7 @@
 
 LOG_MODULE_REGISTER(reference_bcm, LOG_LEVEL_INF);
 
-#if defined(DIAG_ENTROPY_SEEDS)
-#include <zephyr/drivers/entropy.h>
-
-/* SecurityAccess seeds from the board's zephyr,entropy device (virtio-rng on
- * xenvm), as in src/main_doip.c. Opt-in through CMake's DIAG_ENTROPY_SEEDS. */
-static const struct device *const s_entropy_dev =
-    DEVICE_DT_GET(DT_CHOSEN(zephyr_entropy));
-
-static uds_status_t s_trng_cb(uint8_t *buf, uint8_t len)
-{
-    int rc = entropy_get_entropy(s_entropy_dev, buf, (uint16_t)len);
-
-    return (rc == 0) ? UDS_STATUS_OK : UDS_STATUS_ERR_PLATFORM;
-}
-#endif /* DIAG_ENTROPY_SEEDS */
+#include "diag_entropy.h"   /* TRNG callback for SecurityAccess seeds */
 
 /* =============================================================================
  * Configuration
@@ -416,13 +402,14 @@ int main(void)
     bcm_state_init();
 
     /*
-     * Security algorithm init — no TRNG on native_sim (CI / development
-     * build). For production: call uds_security_algo_set_rng_cb() with a
-     * real TRNG callback and uds_security_algo_set_level_key() with OEM
-     * keys from OTP. See EDS's docs/SECURITY_NOTICE.md.
+     * Security algorithm init — seeds come from the board's zephyr,entropy
+     * device (src/diag_entropy.h); native_sim has none and uses EDS's LFSR
+     * fallback (CI / development only). For production also call
+     * uds_security_algo_set_level_key() with OEM keys from OTP. See EDS's
+     * docs/SECURITY_NOTICE.md.
      */
     LOG_WRN("[SEC] Using placeholder AES keys — inject OEM keys before production.");
-#if defined(DIAG_ENTROPY_SEEDS)
+#if defined(DIAG_USE_ENTROPY)
     if (device_is_ready(s_entropy_dev)) {
         (void)uds_security_algo_set_rng_cb(s_trng_cb);
         LOG_INF("[SEC] SecurityAccess seeds from entropy device %s",

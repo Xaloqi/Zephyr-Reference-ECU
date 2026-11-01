@@ -309,6 +309,6 @@ reads as zeros because `diagnostics_config.yaml` gives F190 no value; its length
 is right.
 
 The check has been run against two known-bad builds. Without the TRNG callback
-(`DIAG_ENTROPY_SEEDS=OFF`, EDS's LFSR fallback), both boots hand out
+(EDS's LFSR fallback, which a test build with the callback disabled reproduces), both boots hand out
 `70 e2 38 71 9c 38 …` and the run FAILs. With prj.conf's
 `CONFIG_STACK_CANARIES=y` left in, the build stops on its `.config` assertion.

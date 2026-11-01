@@ -120,21 +120,6 @@ option(DIAG_SECURE_BOOT_BUILD
     OFF
 )
 
-# ---------------------------------------------------------------------------
-# Option: SecurityAccess seeds from the zephyr,entropy device (DoIP build)
-#
-# Registers a TRNG callback in src/main_doip.c or src/main.c instead of EDS's LFSR
-# fallback. Used by the xenvm variant (virtio-rng; see xenvm/README.md). Off
-# by default so the native_sim and NUCLEO images are unchanged.
-# ---------------------------------------------------------------------------
-option(DIAG_ENTROPY_SEEDS
-    "SecurityAccess seeds from the chosen zephyr,entropy device"
-    OFF
-)
-if(DIAG_ENTROPY_SEEDS)
-    target_compile_definitions(app PRIVATE DIAG_ENTROPY_SEEDS=1)
-endif()
-
 if(NOT DIAG_SKIP_CODEGEN AND NOT EXISTS "${DIAG_ROOT}/tools/templates")
     message(STATUS
         "[REF-ECU] Commercial tools/templates/ not present (expected — this "

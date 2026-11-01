@@ -178,7 +178,7 @@ if [ ! -f $OUT/zephyr-domz.bin ]; then
   cd $WS
   west build -p always -b xenvm -s /src -d $B/obj-zephyr -- \
     -DCONF_FILE=$B/prj-xenvm.conf \
-    -DDIAG_SKIP_CODEGEN=ON -DDIAG_DOIP_ONLY_BUILD=ON -DDIAG_ENTROPY_SEEDS=ON \
+    -DDIAG_SKIP_CODEGEN=ON -DDIAG_DOIP_ONLY_BUILD=ON \
     -DEXTRA_CONF_FILE=boards/xenvm_doip.conf \
     -DEXTRA_DTC_OVERLAY_FILE=boards/xenvm_doip.overlay > $B/log-zephyr.txt 2>&1 \
     || { tail -40 $B/log-zephyr.txt; exit 1; }
