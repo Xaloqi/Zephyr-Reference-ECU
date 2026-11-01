@@ -58,6 +58,32 @@ xenvm/pi5/sodev-add.sh sodev xenvm/build-ecu1
 `sodev-add.sh` refuses a DomZ image that was not built as ECU 1, or that is stale
 against these sources.
 
+### CAN FD: the Waveshare 2-CH CAN FD HAT
+
+The same steps with the FD HAT (Rev2.1: 2 x MCP2518FD, 40 MHz, CAN_0 on RP1 SPI0
+CE0 + INT GPIO25, CAN_1 on RP1 SPI1 CE0 = GPIO18 + INT GPIO24, its default "Dual
+SPI Mode"), and a CAN FD DomZ-CAN:
+
+```sh
+XENVM_BUILD_DIR=$PWD/xenvm/build-ecu1-fd XENVM_CAN_ECU_INDEX=1 XENVM_CAN_FD=1 xenvm/run.sh can
+XAQ_CAN_HAT=mcp2518fd xenvm/pi5/sodev-add.sh sodev xenvm/build-ecu1-fd
+(cd sodev && ./build.sh -z --ram=8g)
+```
+
+`XAQ_CAN_HAT` picks the DomD device tree (`domd-mcp2518fd-can.dtsi` instead of
+`domd-mcp2515-can.dtsi`); the kernel has both drivers built in. `sodev-add.sh`
+refuses a classic DomZ-CAN for the FD HAT and the other way round. In DomD,
+`xaloqi-can-bench up` sees the mcp251xfd driver and brings both channels up at
+500 kbit/s (87.5 %) with a 2 Mbit/s data phase (80 %; `XAQ_DBITRATE`), and
+`burst` / `p2load` measure ISO-TP burst traffic on it. One HAT at a time: both
+use RP1 SPI0 CE0 and GPIO25.
+
+Known limits, EDS side: with CAN FD, EDS sends Single Frames of up to 7 bytes,
+FF/CF and its Flow Control as classic frames, and never BRS. A Linux CAN FD
+ISO-TP socket drops those frames (EDS#557). Before v1.26.0 (#542) the unanswered
+classic FF leaves EDS's TX channel in error, and the ECU goes mute (EDS#541): the
+xenvm pin (v1.23.0) has that.
+
 ## Rehearse it without the board
 
 ```sh

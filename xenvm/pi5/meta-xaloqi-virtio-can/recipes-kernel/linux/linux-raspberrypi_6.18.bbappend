@@ -8,7 +8,7 @@ SRC_URI:append = " file://xaloqi-virtio-can.cfg"
 
 # A config fragment option that a dependency drops only gets a warning from
 # kernel-yocto's config check, and the build goes on. Fail instead.
-XAQ_KERNEL_REQUIRED = "SPI_DESIGNWARE SPI_DW_MMIO CAN CAN_RAW CAN_DEV CAN_MCP251X \
+XAQ_KERNEL_REQUIRED = "SPI_DESIGNWARE SPI_DW_MMIO CAN CAN_RAW CAN_DEV CAN_MCP251X CAN_MCP251XFD \
                        CAN_ISOTP CAN_VCAN VIRTIO VIRTIO_MMIO XEN_PRIVCMD XEN_VIRTIO XEN_PRIVCMD_EVENTFD"
 do_configure:append() {
     for o in ${XAQ_KERNEL_REQUIRED}; do

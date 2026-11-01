@@ -7,6 +7,7 @@
 # the SD image with SoDeV's own build.sh. See README.md next to this script.
 #
 #   xenvm/pi5/sodev-add.sh <sodev-workspace> <xenvm-build-dir>
+#   XAQ_CAN_HAT=mcp2518fd xenvm/pi5/sodev-add.sh ...   # the 2-CH CAN FD HAT
 #
 # <xenvm-build-dir> must hold a DomZ image built as ECU 1:
 #   XENVM_BUILD_DIR=<dir> XENVM_CAN_ECU_INDEX=1 xenvm/run.sh can
@@ -28,19 +29,29 @@ SODEV_REV=dc2755f603feb6166b489e2c3cc18eedf8e8f279
 HEAD=$(git -C "$WS" rev-parse HEAD)
 [ "$HEAD" = "$SODEV_REV" ] || echo "WARNING: workspace is at $HEAD, this was checked against $SODEV_REV" >&2
 
+HAT=${XAQ_CAN_HAT:-mcp2515}
+case $HAT in
+  mcp2515|mcp2518fd) ;;
+  *) echo "XAQ_CAN_HAT=$HAT: want mcp2515 (2-CH CAN HAT) or mcp2518fd (2-CH CAN FD HAT)" >&2; exit 1 ;;
+esac
+# The FD HAT needs a CAN FD DomZ-CAN (XENVM_CAN_FD=1), the classic one a classic one.
+FDTAG=; [ "$HAT" = mcp2518fd ] && FDTAG=" fd=1"
 BIN=$XB/out/zephyr-domz-can.bin STAMP=$XB/out/zephyr-domz-can.stamp
 [ -f "$BIN" ] && [ -f "$STAMP" ] || { echo "no DomZ CAN image in $XB/out (run xenvm/run.sh can first)" >&2; exit 1; }
 grep -q ' ecu=1 ' "$STAMP" || { echo "$BIN is not ECU 1: $(cat "$STAMP")" >&2
-  echo "rebuild with XENVM_CAN_ECU_INDEX=1 xenvm/run.sh can" >&2; exit 1; }
+  echo "rebuild with XENVM_CAN_ECU_INDEX=1 ${FDTAG:+XENVM_CAN_FD=1 }xenvm/run.sh can" >&2; exit 1; }
 # The image must be the one these sources build now (the same check run.sh makes).
 . "$XENVM/versions.env"
-APP=$(cd "$XENVM/.." && cat prj.conf CMakeLists.txt boards/xenvm_can.conf boards/xenvm_can.overlay src/*.c src/*.h | sha256sum | cut -c1-16)
-WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV ecu=1 app=$APP"
+APP=$(cd "$XENVM/.." && cat prj.conf CMakeLists.txt boards/xenvm_can.conf boards/xenvm_can.overlay boards/xenvm_can_fd.conf src/*.c src/*.h | sha256sum | cut -c1-16)
+WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV ecu=1$FDTAG app=$APP"
 [ "$(cat "$STAMP")" = "$WANT" ] || { echo "stale DomZ image: built from [$(cat "$STAMP")], sources are [$WANT]" >&2; exit 1; }
 
 L=$WS/meta-xaloqi-virtio-can
 rm -rf "$L"
 cp -r "$HERE/meta-xaloqi-virtio-can" "$L"
+sed -i "s/^XAQ_CAN_HAT ?= .*/XAQ_CAN_HAT ?= \"$HAT\"/" "$L/conf/layer.conf"
+grep -qx "XAQ_CAN_HAT ?= \"$HAT\"" "$L/conf/layer.conf" || { echo "could not set XAQ_CAN_HAT in $L/conf/layer.conf" >&2; exit 1; }
+echo "CAN HAT: $HAT"
 cp_v() { # <src> <dst dir>: copy and show the checksum, so the log says what went in
   install -D -m 0644 "$1" "$2/$(basename "$1")"
   echo "  $(sha256sum "$1" | cut -c1-16)  $(basename "$1") -> ${2#$WS/}"
