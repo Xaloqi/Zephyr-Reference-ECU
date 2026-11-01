@@ -145,10 +145,10 @@ of cpus`, `getting physinfo: Operation not permitted`, and no DomZ.
 | Console | xenconsoled in DomD, `/tool/xenconsoled/domid = 1` | the same, plus a console seeder their Zephyr xenstore needs |
 | DomZ | SoDeV's `domz.cfg` ([`harness/domz.cfg`](harness/domz.cfg), only the kernel path changed) + `virtio=` | `virtio = []`, no device model |
 | Zephyr | **v4.4.1 `1f6485ec`**, SDK 1.0.1, board `xenvm` (GICv2) | the same SHA |
-| EDS | **v1.23.0** `bd5d008` | not present |
+| EDS | **v1.26.1** `e708b24` | not present |
 | Machine | QEMU 10.0 `virt`, cortex-a57, 4 CPUs, 4 GiB, TCG | Raspberry Pi 5 / 4 (Cortex-A76 / A72, GIC-400) |
 
-EDS stays at the release the AGL post and the blog article cite (v1.23.0). A newer EDS release is adopted when it changes something this build uses, or when something new about xenvm is published; the full `run.sh` is then re-run and the article updated in the same change.
+EDS follows `generated/` (v1.26.1): the committed generated sources call EDS APIs newer than v1.23.0, so the pin moved with them. The AGL post and the blog article cite v1.23.0, the release they were run on. A later EDS release is adopted when it changes something this build uses, or when something new about xenvm is published; the full `run.sh` is then re-run and the article updated in the same change.
 
 ## Honest gaps
 
@@ -309,6 +309,6 @@ reads as zeros because `diagnostics_config.yaml` gives F190 no value; its length
 is right.
 
 The check has been run against two known-bad builds. Without the TRNG callback
-(`DIAG_ENTROPY_SEEDS=OFF`, EDS's LFSR fallback), both boots hand out
+(EDS's LFSR fallback, which a test build with the callback disabled reproduces), both boots hand out
 `70 e2 38 71 9c 38 …` and the run FAILs. With prj.conf's
 `CONFIG_STACK_CANARIES=y` left in, the build stops on its `.config` assertion.

@@ -135,6 +135,15 @@ the physical CAN bus (`7DF#023E00`) gets a real positive response
 (`7E8#027E00`) — genuine ISO-TP + UDS dispatch on real silicon, not a log
 message.
 
+SecurityAccess seeds come from the board's hardware RNG (`src/diag_entropy.h`;
+`native_sim` keeps EDS's LFSR fallback). To check on the bench that boots hand
+out different first seeds:
+
+```bash
+pip install python-can
+python3 scripts/check_seed_entropy.py --channel /dev/serial/by-id/<adapter>@115200
+```
+
 **Resolved, not just worked around.** This board's NVM persistence
 (DTC-mirror and `BCM_DoorCycleCount`, above) used to fail outright —
 `fs_nvs: Invalid sector size` — because Zephyr's NVS subsystem stores its

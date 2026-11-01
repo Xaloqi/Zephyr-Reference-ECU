@@ -61,7 +61,9 @@
 	status = "okay";
 };
 
-/* ── Hardware RNG — seeds the UDS SecurityAccess AES-CMAC challenge ───────── */
+/* ── Hardware RNG — seeds the UDS SecurityAccess AES-CMAC challenge through
+ * the TRNG callback in src/diag_entropy.h (needs the zephyr,entropy chosen
+ * node below and CONFIG_ENTROPY_GENERATOR=y; the build fails without them) ─ */
 &rng {
 	status = "okay";
 };

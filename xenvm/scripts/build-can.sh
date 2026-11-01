@@ -67,7 +67,7 @@ if [ ! -f $OUT/zephyr-domz-can.bin ]; then
   grep -v '^CONFIG_STACK_CANARIES=' /src/prj.conf > $B/prj-xenvm-can.conf
   cd $WS
   west build -p always -b xenvm -s /src -d $B/obj-zephyr-can -- \
-    -DCONF_FILE=$B/prj-xenvm-can.conf -DDIAG_SKIP_CODEGEN=ON -DDIAG_ENTROPY_SEEDS=ON \
+    -DCONF_FILE=$B/prj-xenvm-can.conf -DDIAG_SKIP_CODEGEN=ON \
     -DEXTRA_CONF_FILE=boards/xenvm_can.conf \
     -DEXTRA_DTC_OVERLAY_FILE=boards/xenvm_can.overlay > $B/log-zephyr-can.txt 2>&1 \
     || { tail -40 $B/log-zephyr-can.txt; exit 1; }
