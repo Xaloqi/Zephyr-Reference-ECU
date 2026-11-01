@@ -129,6 +129,12 @@ west build -b nucleo_h753zi . -- -DDIAG_SKIP_CODEGEN=ON
 west flash
 ```
 
+CAN FD (the Raspberry Pi 5 CAN FD bench, `xenvm/pi5/README.md`): add `-DDIAG_CAN_FD=ON`.
+FDCAN1 then runs CAN FD with a 2 Mbit/s data phase at 80 % (`boards/nucleo_h753zi_canfd.*`;
+arbitration stays 500 kbit/s at 87.5 %), and EDS's ISO-TP is built with CAN FD. It needs an
+FD-rated transceiver: the SN65HVD230 below is specified to 1 Mbit/s. The default build is
+unchanged by this option (same `zephyr.bin`). EDS's CAN FD transmit limits: EDS#557.
+
 Confirmed on real hardware, not simulated: the firmware boots, the UDS
 stack reports `6 DIDs 2 DTCs`, and a real `TesterPresent` request sent over
 the physical CAN bus (`7DF#023E00`) gets a real positive response

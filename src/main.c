@@ -463,6 +463,16 @@ int main(void)
     }
 #endif
 
+#if defined(DIAG_CAN_FD)
+    /* -DDIAG_CAN_FD=ON (the Pi 5 CAN FD bench): EDS's ISO-TP is built with
+     * ISOTP_ENABLE_CAN_FD, but the generated init leaves use_fd false. With it
+     * set, Single Frames of 8..62 bytes go out as CAN FD frames, and requests
+     * at any FD TX_DL are received. Multi-frame responses still use 8-byte
+     * classic FF/CF, and nothing sets BRS (EDS v1.25.0; EDS#557). */
+    tp->use_fd = true;
+    LOG_INF("CAN FD: FDCAN1 FD mode, ISO-TP use_fd (TX: FD SF 8..62 B, FF/CF classic)");
+#endif
+
     (void)uds_periodic_init();
     (void)uds_session_register_change_cb(srv->cfg.session_ctx,
                                           s_on_session_change);
