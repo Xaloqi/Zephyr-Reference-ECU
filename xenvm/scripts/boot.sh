@@ -28,7 +28,7 @@ initrd() { # <name> <init> <payload files...>; <src>:<name> installs src as /roo
 }
 initrd dom0 $H/dom0-init.sh $OUT/xs-seed-port
 if [ $VARIANT = can ]; then
-  printf 'BOOTS=%s\nECU=%s\n' "${XENVM_CAN_BOOTS:-2}" "${XENVM_CAN_ECU_INDEX:-}" > $RUN/can.env
+  printf 'BOOTS=%s\nECU=%s\nFD=%s\n' "${XENVM_CAN_BOOTS:-2}" "${XENVM_CAN_ECU_INDEX:-}" "${XENVM_CAN_FD:-}" > $RUN/can.env
   # XENVM_CAN_DOMD_TEST / XENVM_CAN_EXTRA: another DomD script and extra files
   # (xenvm/pi5/rehearse.sh runs the Pi 5 bench driver this way). Unset: run.sh can.
   initrd domd $H/domd-init.sh ${XENVM_CAN_DOMD_TEST:-$H/domd-test-can.sh}:domd-test.sh $H/isotp_probe.py $H/can_dump.py \

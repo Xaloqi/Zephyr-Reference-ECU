@@ -52,8 +52,8 @@ fi
 # --- Zephyr: ReferenceBCM (CAN) for xenvm, with Xaloqi/zephyr-virtio-can -------
 # As for the DoIP image: stamped with the commits compiled and the app's inputs.
 CSTAMP=$OUT/zephyr-domz-can.stamp
-app_hash_can() { (cd /src && cat prj.conf CMakeLists.txt boards/xenvm_can.conf boards/xenvm_can.overlay src/*.c src/*.h | sha256sum | cut -c1-16); }
-PINS="zephyr=$ZEPHYR_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX}"
+app_hash_can() { (cd /src && cat prj.conf CMakeLists.txt boards/xenvm_can.conf boards/xenvm_can.overlay boards/xenvm_can_fd.conf src/*.c src/*.h | sha256sum | cut -c1-16); }
+PINS="zephyr=$ZEPHYR_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX}${XENVM_CAN_FD:+ fd=1}"
 WANT="$PINS app=$(app_hash_can)"
 if [ -f $OUT/zephyr-domz-can.bin ] && [ "$(cat $CSTAMP 2>/dev/null)" != "$WANT" ]; then
   log "CAN DomZ image is stale or unstamped (stamp: $(cat $CSTAMP 2>/dev/null || echo none)); rebuilding"
@@ -70,13 +70,20 @@ if [ ! -f $OUT/zephyr-domz-can.bin ]; then
     -DCONF_FILE=$B/prj-xenvm-can.conf -DDIAG_SKIP_CODEGEN=ON \
     -DEXTRA_CONF_FILE=boards/xenvm_can.conf \
     -DEXTRA_DTC_OVERLAY_FILE=boards/xenvm_can.overlay \
-    ${XENVM_CAN_ECU_INDEX:+-DDIAG_CAN_ECU_INDEX=$XENVM_CAN_ECU_INDEX} > $B/log-zephyr-can.txt 2>&1 \
+    ${XENVM_CAN_ECU_INDEX:+-DDIAG_CAN_ECU_INDEX=$XENVM_CAN_ECU_INDEX} \
+    ${XENVM_CAN_FD:+-DDIAG_CAN_FD=ON} > $B/log-zephyr-can.txt 2>&1 \
     || { tail -40 $B/log-zephyr-can.txt; exit 1; }
   C=$B/obj-zephyr-can/zephyr/.config
   for sym in PICOLIBC ENTROPY_GENERATOR ENTROPY_VIRTIO CAN CAN_VIRTIO REBOOT; do
     grep -qx "CONFIG_$sym=y" $C || { echo "  .config: CONFIG_$sym is not y" >&2; exit 1; }
     echo "  .config: CONFIG_$sym=y"
   done
+  if [ -n "${XENVM_CAN_FD:-}" ]; then
+    grep -qx "CONFIG_CAN_FD_MODE=y" $C || { echo "  .config: CONFIG_CAN_FD_MODE is not y (XENVM_CAN_FD)" >&2; exit 1; }
+    echo "  .config: CONFIG_CAN_FD_MODE=y"
+  elif grep -qx "CONFIG_CAN_FD_MODE=y" $C; then
+    echo "  .config: CONFIG_CAN_FD_MODE=y without XENVM_CAN_FD" >&2; exit 1
+  fi
   for sym in NEWLIB_LIBC STACK_CANARIES REQUIRES_STACK_CANARIES EDS_REQUIRE_STACK_CANARIES WATCHDOG \
              TEST_RANDOM_GENERATOR CAN_LOOPBACK NETWORKING; do
     ! grep -qx "CONFIG_$sym=y" $C || { echo "  .config: CONFIG_$sym=y, expected off" >&2; exit 1; }
@@ -84,6 +91,6 @@ if [ ! -f $OUT/zephyr-domz-can.bin ]; then
   done
   cp $B/obj-zephyr-can/zephyr/zephyr.bin $OUT/zephyr-domz-can.bin
   echo "zephyr=$(git -C $WS/zephyr rev-parse HEAD) eds=$(git -C $WS/modules/xaloqi-eds rev-parse HEAD)" \
-       "virtio-can=$(git -C $WS/modules/zephyr-virtio-can rev-parse HEAD)${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX}" \
+       "virtio-can=$(git -C $WS/modules/zephyr-virtio-can rev-parse HEAD)${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX}${XENVM_CAN_FD:+ fd=1}" \
        "app=$(app_hash_can)" > $CSTAMP
 fi
