@@ -14,7 +14,17 @@
 #   xaloqi-can-bench canary         as domz with the backend on vcan9: DomZ must stay
 #                                   silent while the NUCLEO still answers
 #   xaloqi-can-bench p2 ECU [N]     P2 for ECU 0 (NUCLEO) or 1 (DomZ-CAN), N samples (1000)
+#   xaloqi-can-bench p2load ECU [N] as p2, with ISO-TP bursts can0 -> can1 loading the bus
+#   xaloqi-can-bench burst link [N] [SIZE]      ISO-TP bursts can0 -> can1 (BS 0, STmin 0),
+#                                   message + frame loss on can1 (500 x 4000 B)
+#   xaloqi-can-bench burst ECU [N] [DIDS]       multi-frame 22 requests to ECU 0 or 1 from
+#                                   can1, response frame loss (200 x 33 DIDs)
 #   xaloqi-can-bench down           destroy DomZ-CAN, stop the backends
+#
+# CAN FD: the 2-CH CAN FD HAT (MCP2518FD, mcp251xfd) is detected, or XAQ_CAN_FD=1/0
+# forces it. FD buses: arbitration BITRATE at 87.5 %, data XAQ_DBITRATE (2000000) at
+# 80 %, and the tools send CAN FD frames with BRS (TX_DL 64). XAQ_FD=0 on burst/p2
+# gives classic frames on the same FD bus, the comparison row.
 #
 # Topology: HAT can0 and can1 and the NUCLEO are on ONE physical bus. The tester
 # always uses can1 and the virtio-can backend uses can0, so every request to
@@ -31,6 +41,13 @@ LOGDIR=${XAQ_LOGDIR:-/var/log/xaloqi-can}
 BT=${XAQ_BACKEND_TYPE-standalone}
 # 1 in the QEMU rehearsal: can0/can1 are vcan, which take no bitrate.
 VIRTUAL=${XAQ_VIRTUAL:-0}
+# The FD HAT's driver is mcp251xfd; the classic HAT's mcp251x.
+drv() { basename "$(readlink /sys/class/net/$1/device/driver 2>/dev/null)" 2>/dev/null; }
+if [ -z "${XAQ_CAN_FD:-}" ]; then
+  XAQ_CAN_FD=0; [ "$(drv can0)" = mcp251xfd ] && XAQ_CAN_FD=1
+fi
+DBR=${XAQ_DBITRATE:-2000000}
+export XAQ_FD=${XAQ_FD:-$XAQ_CAN_FD}
 RUN=/run/xaloqi-can
 mkdir -p "$LOGDIR" "$RUN"
 ts() { date +%Y%m%dT%H%M%S; }
@@ -40,17 +57,34 @@ fail() { echo "FAIL: $*"; exit 1; }
 up() {
   br=${1:-500000}
   for i in can0 can1; do
-    ip link show $i >/dev/null 2>&1 || fail "$i missing (MCP2515 not probed? dmesg | grep -i mcp251)"
-    [ "$VIRTUAL" = 1 ] && { ip link set $i up; continue; }
+    ip link show $i >/dev/null 2>&1 || fail "$i missing (CAN controller not probed? dmesg | grep -i mcp251)"
+    if [ "$VIRTUAL" = 1 ]; then
+      ip link set $i down 2>/dev/null
+      [ "$XAQ_CAN_FD" = 1 ] && { ip link set $i mtu 72 || fail "$i: mtu 72"; }
+      ip link set $i up; continue
+    fi
     ip link set $i down 2>/dev/null
-    # 16 MHz MCP2515: 8 MHz CAN clock, 16 tq at 500 kbit/s, 87.5 % = the NUCLEO's sample point.
-    ip link set $i type can bitrate "$br" sample-point 0.875 restart-ms 100 || fail "$i: bitrate $br"
+    if [ "$XAQ_CAN_FD" = 1 ]; then
+      [ "$(drv $i)" = mcp251xfd ] || fail "$i: XAQ_CAN_FD=1 but the driver is '$(drv $i)', not mcp251xfd"
+      # 40 MHz MCP2518FD: 80 tq at 500 kbit/s and 20 tq at 2 Mbit/s, so 87.5 % and 80 %
+      # are exact; the NUCLEO's FDCAN (80 MHz) uses the same points.
+      ip link set $i type can bitrate "$br" sample-point 0.875 dbitrate "$DBR" dsample-point 0.8 \
+        fd on restart-ms 100 || fail "$i: bitrate $br dbitrate $DBR fd on"
+    else
+      # 16 MHz MCP2515: 8 MHz CAN clock, 16 tq at 500 kbit/s, 87.5 % = the NUCLEO's sample point.
+      ip link set $i type can bitrate "$br" sample-point 0.875 restart-ms 100 || fail "$i: bitrate $br"
+    fi
     ip link set $i up || fail "$i up"
   done
   ip link show vcan9 >/dev/null 2>&1 || { ip link add dev vcan9 type vcan && ip link set vcan9 up; }
   ip -details link show can0 | sed -n '1,6p'
   ip -details link show can1 | grep -E 'bitrate|state'
-  [ "$VIRTUAL" = 1 ] && pass "can0/can1 up (virtual), vcan9 up"
+  [ "$VIRTUAL" = 1 ] && pass "can0/can1 up (virtual$([ "$XAQ_CAN_FD" = 1 ] && echo ", mtu 72")), vcan9 up"
+  if [ "$XAQ_CAN_FD" = 1 ]; then
+    ip -details link show can0 | grep -q "dbitrate $DBR" || fail "can0: no 'dbitrate $DBR' after up"
+    ip -details link show can0 | grep -q "clock 40000000" || fail "can0: clock is not 40000000 (40 MHz crystal expected)"
+    pass "can0/can1 up, CAN FD: $br bit/s / data $DBR bit/s, vcan9 up"
+  fi
   pass "can0/can1 up at $br bit/s, vcan9 up"
 }
 
@@ -60,24 +94,43 @@ probe() { # <req> <rsp> <log>
   python3 $LIB/can_dump.py $TESTER 15 400 WIRE > "$3.wire" 2>&1 &
   W=$!
   sleep 0.3
-  timeout 30 python3 $LIB/isotp_probe.py $TESTER "$1" "$2" | tee "$3"
+  timeout 30 python3 $LIB/isotp_probe.py $TESTER "$1" "$2" $([ "$XAQ_CAN_FD" = 1 ] && echo fd) | tee "$3"
   sleep 1; kill $W 2>/dev/null; wait $W 2>/dev/null
   cat "$3.wire"
 }
 
-answered() { # <log>: every request answered (no TIMEOUT), 5 exchanges
+answered() { # <log> [full]: every request answered (no TIMEOUT), 5 exchanges
+  # "full": the ECU is not EDS (the QEMU rehearsal's stand-in NUCLEO), so no EDS#557.
+  if [ "$XAQ_CAN_FD" = 1 ] && [ "${2:-}" != full ]; then
+    # EDS#557: an FD-mode EDS sends SFs <= 7 B, FF/CF and FC as classic frames,
+    # which a CANFD_MTU ISO-TP socket drops (net/can/isotp.c). Until it is fixed
+    # exactly its FD-only answers come back: 22 F190 and 27 01 x2 (FD SFs), and
+    # 3E 00, 10 03, 22 x4, 22 x33 time out (as xenvm/scripts/check_can.py).
+    for q in "22 f1 90" "27 01"; do
+      grep "^UDS $q -> " "$1" | grep -q TIMEOUT && return 1
+      grep -q "^UDS $q -> " "$1" || return 1
+    done
+    for q in "3e 00" "10 03" "22 f1 90 f1 90 f1 90 f1 90" "22 f1 90 x33"; do
+      grep -q "^UDS $q -> TIMEOUT" "$1" || { echo "NOTE: '$q' answered: EDS#557 fixed? update answered()"; return 1; }
+    done
+    return 0
+  fi
   [ "$(grep -c '^UDS ' "$1")" -ge 5 ] && ! grep -q 'TIMEOUT' "$1"
 }
 
 nucleo() {
   L=$LOGDIR/nucleo-$(ts).log
   probe 7E0 7E8 "$L"
-  answered "$L" || fail "NUCLEO did not answer every request ($L)"
+  answered "$L" ${XAQ_NUCLEO_STANDIN:+full} || fail "NUCLEO did not answer every request ($L)"
   grep -q 'WIRE can1 7E8 ' "$L.wire" || fail "no 0x7E8 frame on $TESTER"
   pass "NUCLEO (ECU 0) answered 3E/10 03/22 F190/27 01 x2 over the physical bus ($L)"
 }
 
 backends() { # <bus>
+  # A DomZ-CAN still up keeps its backend/virtio nodes; a new frontend would pick
+  # them up and exit (XenIoctlError ConnectionRefused, seen in the 2026-11-01
+  # rehearsal's canary). Destroy it before the backends restart.
+  xl destroy $NAME 2>/dev/null
   stop_backends
   if [ ! -S /var/run/xenstored/socket ]; then
     # SoDeV's xenstore server is in the Zephyr Dom0; DomD has only /dev/xen/xenbus.
@@ -97,6 +150,9 @@ backends() { # <bus>
 stop_backends() {
   for p in xvf vdc vdr relay; do
     [ -f $RUN/$p.pid ] && kill "$(cat $RUN/$p.pid)" 2>/dev/null
+    # The relay's socket can outlive it; left behind, backends() would not start a
+    # new relay and the next frontend gets ECONNREFUSED (2026-11-01 rehearsal canary).
+    [ $p = relay ] && [ -f $RUN/relay.pid ] && rm -f /var/run/xenstored/socket
     rm -f $RUN/$p.pid
   done
   sleep 0.5
@@ -130,6 +186,14 @@ create() {
   # Zephyr would probe empty slots: stop here rather than chase a silent DomZ.
   echo "$B" | grep -q '/0/base = "0x2000000"' && echo "$B" | grep -q '/0/irq = "33"' \
     || { xl destroy $NAME; fail "virtio slot 0 is not 0x2000000/33 (see xenstore above)"; }
+  # Unpause only once xen-vhost-frontend has created both devices, plus 1 s for it to
+  # start serving them (domd-test-can.sh waits 2 s). Unpausing at once lost the race
+  # in 3 of 4 QEMU rehearsals on 2026-11-01: Zephyr's first read of virtio slot 0
+  # took a data abort (virtio_mmio_init_common), and DomZ-CAN never started.
+  for i in $(seq 1 100); do grep -q "Created device $ID / 1" $RUN/xvf.log 2>/dev/null && break; sleep 0.1; done
+  grep -q "Created device $ID / 1" $RUN/xvf.log || { echo "--- xen-vhost-frontend"; cat $RUN/xvf.log
+    xl destroy $NAME; fail "xen-vhost-frontend did not create DomZ-CAN's devices ($RUN/xvf.log)"; }
+  sleep 1
   xl unpause $NAME
   C=/var/log/xen/console/guest-$NAME.log
   for i in $(seq 1 60); do grep -q 'diag task started\|refusing' $C 2>/dev/null && break; sleep 1; done
@@ -162,7 +226,7 @@ canary() {
   # Positive control: the bus itself still works.
   L2=$LOGDIR/canary-nucleo-$(ts).log
   probe 7E0 7E8 "$L2"
-  answered "$L2" || fail "NUCLEO did not answer during the canary: the bus is down, canary inconclusive"
+  answered "$L2" ${XAQ_NUCLEO_STANDIN:+full} || fail "NUCLEO did not answer during the canary: the bus is down, canary inconclusive"
   pass "backend on vcan9: $NAME silent, NUCLEO answered ($L, $L2)"
 }
 
@@ -170,6 +234,29 @@ p2() {
   e=${1:?ECU 0 or 1}; n=${2:-1000}
   case $e in 0) q=7E0; r=7E8 ;; 1) q=7E1; r=7E9 ;; *) fail "ECU is 0 or 1" ;; esac
   python3 $LIB/uds_timing.py $TESTER $q $r "$n" 20 "$LOGDIR/p2-ecu$e-$(ts).csv"
+}
+
+p2load() {
+  e=${1:?ECU 0 or 1}; n=${2:-1000}
+  # Bus load: back-to-back ISO-TP bursts can0 -> can1 (ID 0x6F0), not on either ECU's IDs.
+  python3 $LIB/isotp_burst.py link can0 can1 1000000 4000 > $RUN/load.log 2>&1 &
+  LP=$!
+  sleep 1
+  kill -0 $LP 2>/dev/null || { cat $RUN/load.log; fail "bus load did not start"; }
+  p2 "$e" "$n"; rc=$?
+  kill $LP 2>/dev/null; wait $LP 2>/dev/null
+  echo "--- load: $(ip -s -d link show can1 | grep -A1 'RX:' | tail -1)"
+  exit $rc
+}
+
+burst() {
+  what=${1:?link or ECU 0/1}; shift
+  case $what in
+    link) python3 $LIB/isotp_burst.py link can0 can1 "${1:-500}" "${2:-4000}" "$LOGDIR/burst-link-$(ts).csv" ;;
+    0) python3 $LIB/isotp_burst.py ecu $TESTER 7E0 7E8 "${1:-200}" "${2:-33}" "$LOGDIR/burst-ecu0-$(ts).csv" ;;
+    1) python3 $LIB/isotp_burst.py ecu $TESTER 7E1 7E9 "${1:-200}" "${2:-33}" "$LOGDIR/burst-ecu1-$(ts).csv" ;;
+    *) fail "burst link|0|1" ;;
+  esac
 }
 
 down() {
@@ -180,6 +267,6 @@ down() {
 
 cmd=${1:-}; [ $# -gt 0 ] && shift
 case $cmd in
-  up|wire|nucleo|domz|canary|p2|down) $cmd "$@" ;;
-  *) sed -n '5,17p' "$0"; exit 2 ;;
+  up|wire|nucleo|domz|canary|p2|p2load|burst|down) $cmd "$@" ;;
+  *) sed -n '5,27p' "$0"; exit 2 ;;
 esac

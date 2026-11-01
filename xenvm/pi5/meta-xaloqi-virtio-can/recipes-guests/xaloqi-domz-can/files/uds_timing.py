@@ -24,6 +24,11 @@ the controller's receive-interrupt latency, the same for every ECU on the
 bus, so the comparison between ECUs and paths holds. It is an upper bound on
 the ECU's own P2.
 
+XAQ_FD=1 (the CAN FD bench): the request goes out as a CAN FD frame with BRS
+(the same 02 3E 00 PCI and padding, 8 bytes) and responses are read in either
+format: EDS answers this one with a classic frame (EDS#557), which is valid on
+an FD bus. The request frame is then ~24 % shorter on the wire at 2 Mbit/s data.
+
 Prints one summary line (n, timeouts, min, median, p95, p99, max in ms), then
 PASS or FAIL against P2server_max (25 ms, diagnostics_config.yaml; XAQ_P2_MAX_MS
 overrides it for the QEMU rehearsal only).
@@ -34,6 +39,9 @@ SOL_CAN_RAW = 101
 CAN_RAW_RECV_OWN_MSGS = 4
 SO_TIMESTAMPNS = 35
 FMT = "=IB3x8s"
+FDFMT = "=IBB2x64s"
+CAN_RAW_FD_FRAMES, CANFD_BRS = 5, 0x01
+FD = os.environ.get("XAQ_FD", "0") == "1"
 # P2server_max of ReferenceBCM (diagnostics_config.yaml). XAQ_P2_MAX_MS overrides it
 # only for the QEMU rehearsal, where TCG timing says nothing about the Pi.
 P2_MAX_MS = float(os.environ.get("XAQ_P2_MAX_MS", "25"))
@@ -49,13 +57,16 @@ def pct(xs, p):
 
 
 def recv(s):
-    data, anc, _flags, _addr = s.recvmsg(16, socket.CMSG_SPACE(16))
+    data, anc, _flags, _addr = s.recvmsg(72, socket.CMSG_SPACE(16))
     ts = None
     for lvl, typ, val in anc:
         if lvl == socket.SOL_SOCKET and typ == SO_TIMESTAMPNS:
             sec, nsec = struct.unpack("=qq", val[:16])
             ts = sec + nsec / 1e9
-    cid, dlc, payload = struct.unpack(FMT, data)
+    if len(data) == 72:
+        cid, dlc, _f, payload = struct.unpack(FDFMT, data)
+    else:
+        cid, dlc, payload = struct.unpack(FMT, data)
     return cid & socket.CAN_SFF_MASK, payload[:dlc], ts
 
 
@@ -66,15 +77,19 @@ def main():
     csv = open(sys.argv[6], "w") if len(sys.argv) > 6 else None
     s = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
     s.setsockopt(SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS, 1)
+    if FD:
+        s.setsockopt(SOL_CAN_RAW, CAN_RAW_FD_FRAMES, 1)
     s.setsockopt(socket.SOL_SOCKET, SO_TIMESTAMPNS, 1)
     s.setsockopt(SOL_CAN_RAW, socket.CAN_RAW_FILTER,
                  struct.pack("=II", req, socket.CAN_SFF_MASK) + struct.pack("=II", rsp, socket.CAN_SFF_MASK))
     s.bind((iface,))
-    frame = struct.pack(FMT, req, 8, bytes([0x02, 0x3E, 0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA]))
+    tp = bytes([0x02, 0x3E, 0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA])
+    frame = struct.pack(FDFMT, req, 8, CANFD_BRS, tp) if FD else struct.pack(FMT, req, 8, tp)
     lat, timeouts, pending, bad, dup = [], 0, 0, 0, 0
     if csv:
         csv.write("sample,p2_ms\n")
-    print("P2 %s req 0x%03X rsp 0x%03X n=%d gap=%.0f ms" % (iface, req, rsp, n, gap * 1000), flush=True)
+    print("P2 %s req 0x%03X rsp 0x%03X n=%d gap=%.0f ms%s" % (iface, req, rsp, n, gap * 1000,
+                                                          " (request: CAN FD + BRS)" if FD else ""), flush=True)
     for i in range(n):
         # Anything on RSP_ID between two requests answered nobody: a second ECU on
         # the same response ID (an ID collision), or a late duplicate. Count it.

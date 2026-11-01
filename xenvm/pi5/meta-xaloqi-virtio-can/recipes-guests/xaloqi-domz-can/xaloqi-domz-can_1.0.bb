@@ -17,6 +17,7 @@ SRC_URI = " \
     file://zephyr-domz-can.stamp \
     file://xaloqi-can-bench \
     file://uds_timing.py \
+    file://isotp_burst.py \
     file://isotp_probe.py \
     file://can_dump.py \
     file://xs-sock-relay.py \
@@ -35,7 +36,7 @@ do_install() {
     install -m 0644 ${S}/zephyr-domz-can.bin ${D}/usr/lib/xen/boot/zephyr-domz-can.bin
     install -m 0644 ${S}/zephyr-domz-can.stamp ${D}${datadir}/xaloqi-can/zephyr-domz-can.stamp
     install -m 0755 ${S}/xaloqi-can-bench ${D}${bindir}/xaloqi-can-bench
-    for f in uds_timing.py isotp_probe.py can_dump.py xs-sock-relay.py; do
+    for f in uds_timing.py isotp_burst.py isotp_probe.py can_dump.py xs-sock-relay.py; do
         install -m 0755 ${S}/$f ${D}${libexecdir}/xaloqi-can/$f
     done
 }

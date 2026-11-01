@@ -21,7 +21,7 @@ F=/src/xenvm/pi5/meta-xaloqi-virtio-can/recipes-guests/xaloqi-domz-can/files
 R=/src/xenvm/pi5/rehearse
 docker run --rm -v "$REPO":/src:ro -v "$BUILD":/build \
   -e XENVM_CAN_DOMD_TEST=$R/domd-rehearse.sh \
-  -e XENVM_CAN_EXTRA="$R/can_bridge.py $R/fake_nucleo.py $F/uds_timing.py $F/xaloqi-can-bench" \
+  -e XENVM_CAN_FD -e XENVM_CAN_EXTRA="$R/can_bridge.py $R/fake_nucleo.py $F/uds_timing.py $F/isotp_burst.py $F/xaloqi-can-bench" \
   xaloqi-zre-xenvm-builder:1 \
   bash -c "/src/xenvm/scripts/boot.sh can; rc=\$?; chown -R $(id -u):$(id -g) /build; exit \$rc"
 LOG=$BUILD/run-can/serial.log
@@ -40,6 +40,9 @@ for l in lines:
     elif cur:
         steps[cur].append(l)
 want = ["up", "nucleo", "domz-can0", "p2-0", "p2-1", "canary", "down"]
+fd = any(l.startswith("PASS: can0/can1 up (virtual, mtu 72)") for l in steps.get("up", []))
+if fd:
+    want[5:5] = ["burst-link", "p2load-0", "burst-0", "burst-1"]
 errors = []
 print("=" * 72)
 for s in want:
@@ -48,7 +51,7 @@ for s in want:
         errors.append("step %s did not run" % s); continue
     verdict = next((l for l in reversed(out) if l.startswith(("PASS", "FAIL"))), "no verdict")
     for l in out:
-        if l.startswith(("ISOTP", "UDS ", "P2 ", "DomZ-CAN domid")) or "UDS stack ready" in l or "/backend/virtio/" in l:
+        if l.startswith(("ISOTP", "UDS ", "P2 ", "DomZ-CAN domid", "burst ", "NOTE")) or "UDS stack ready" in l or "/backend/virtio/" in l:
             print("  [%s] %s" % (s, l))
     print("%-10s %s" % (s, verdict))
     if not verdict.startswith("PASS"):
@@ -59,5 +62,6 @@ print("=" * 72)
 if errors:
     print("FAIL: " + "; ".join(errors)); sys.exit(1)
 print("PASS: xaloqi-can-bench ran up, nucleo (stand-in), domz (virtio-can, ECU 1, across the "
-      "bridged bus), p2 for both ECUs, canary (DomZ silent, stand-in answered) and down")
+      "bridged bus), p2 for both ECUs, %scanary (DomZ silent, stand-in answered) and down"
+      % ("CAN FD (MTU 72): burst link, p2load 0, burst 0, burst 1 (classic ISO-TP, EDS#557), " if fd else ""))
 EOF
