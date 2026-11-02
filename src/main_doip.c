@@ -139,6 +139,9 @@
 #include "services.h"                      /* uds_service_0x34_pending_tick() */
 #include <zephyr/dfu/mcuboot.h>            /* boot_is_img_confirmed() et al. */
 #endif
+#if defined(DIAG_BENCH_SLOW_ROUTINE)
+#include "bench_slow_routine.h"            /* [EDS#282] bench slow routine */
+#endif
 
 /* --------------------------------------------------------------------------
  * Generated headers (from diagnostics_config.yaml via EDS's codegen.py)
@@ -423,6 +426,16 @@ int main(void)
         LOG_ERR("UDS server context NULL after init.");
         return -1;
     }
+
+#if defined(DIAG_BENCH_SLOW_ROUTINE)
+    /* [EDS#282] Bench only: RID 0xF0F0 answers 0x78 (bench_slow_routine.h);
+     * the DoIP server drives it with uds_server_poll(). */
+    LOG_WRN("[BENCH] Slow routine 0xF0F0 registered (response-pending bench).");
+    if (bench_slow_routine_register() != UDS_STATUS_OK) {
+        LOG_ERR("Bench slow routine registration failed.");
+        return -1;
+    }
+#endif
 
     (void)uds_periodic_init();
     (void)uds_session_register_change_cb(srv->cfg.session_ctx,
