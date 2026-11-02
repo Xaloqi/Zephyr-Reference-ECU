@@ -57,6 +57,9 @@
 #include "services.h"                      /* uds_service_0x34_pending_tick() */
 #include <zephyr/dfu/mcuboot.h>            /* boot_is_img_confirmed() et al. */
 #endif
+#if defined(DIAG_BENCH_SLOW_ROUTINE)
+#include "bench_slow_routine.h"            /* [EDS#282] bench slow routine */
+#endif
 
 /* --------------------------------------------------------------------------
  * Generated headers (from diagnostics_config.yaml via EDS's codegen.py)
@@ -229,6 +232,24 @@ static void diag_task_entry(void *p1, void *p2, void *p3)
 
         on_tick(&tick_ctx);
         bcm_state_monitor_tick();
+
+#if defined(DIAG_BENCH_SLOW_ROUTINE)
+        /* [EDS#282] Response-pending job: one bounded step per tick; the 0x78
+         * keepalives and the final response come back here. On ISO-TP busy the
+         * server returns the same frame next tick. Same lock as the dispatch. */
+        {
+            static uds_msg_buf_t s_pending_frame;
+
+            (void)diag_mutex_lock(&s_session_lock);
+            if (uds_server_poll(srv, &s_pending_frame) == UDS_POLL_FRAME) {
+                if (isotp_transmit(tp, s_pending_frame.data,
+                                   (uint32_t)s_pending_frame.length) == UDS_STATUS_OK) {
+                    uds_server_frame_sent(srv);
+                }
+            }
+            (void)diag_mutex_unlock(&s_session_lock);
+        }
+#endif
 
         {
             static uds_msg_buf_t s_periodic_frame;
@@ -448,6 +469,14 @@ int main(void)
     if ((srv == NULL) || (tp == NULL)) {
         LOG_ERR("Stack context NULL after init."); return -1;
     }
+
+#if defined(DIAG_BENCH_SLOW_ROUTINE)
+    /* [EDS#282] Bench only: RID 0xF0F0 answers 0x78 (bench_slow_routine.h). */
+    LOG_WRN("[BENCH] Slow routine 0xF0F0 registered (response-pending bench).");
+    if (bench_slow_routine_register() != UDS_STATUS_OK) {
+        LOG_ERR("Bench slow routine registration failed."); return -1;
+    }
+#endif
 
     (void)uds_periodic_init();
     (void)uds_session_register_change_cb(srv->cfg.session_ctx,

@@ -336,6 +336,19 @@ Commands and the full campaign: [docs/secure-boot.md](docs/secure-boot.md#firmwa
 
 ---
 
+## Bench only: a slow routine for the NRC 0x78 cadence
+
+`-DDIAG_BENCH_SLOW_ROUTINE=ON` (default OFF; CAN and DoIP builds) registers RID `0xF0F0`, the
+same bench routine as EDS's `basic_ecu` ([EDS#282](https://github.com/Xaloqi/EDS/issues/282)):
+`31 01 F0 F0 <N> <step/10>` answers `7F 31 78` at once, busy-waits `N` steps of `step` ms,
+sends `7F 31 78` keepalives, then `71 01 F0 F0 <N>`. Not for production, and a normal image
+has no `0xF0F0`. It needs an EDS with the generic response-pending path (after v1.26.1); the
+configure step says so if the pinned EDS has no `bench_slow_routine.c`. **Keep the step at 50 ms
+or less** (`<step/10>` of 5): this ECU's watchdog window is 100 ms and a 100 ms step resets it.
+
+Checked on the NUCLEO-H753ZI over CAN at 500 kbit/s (`31 01 F0 F0 0A 05`, ten 50 ms steps): `7F 31 78`
+at 1.7 ms, then every 100 ms (101.8, 201.9, 302.0, 402.0), final `71 01 F0 F0 0A` at 502.2 ms.
+
 ## As a Xen guest: AGL SoDeV's DomZ, over DoIP or CAN
 
 `xenvm/run.sh` builds Xen 4.22, two Linux domains, QEMU and this ECU (DoIP build,

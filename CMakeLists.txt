@@ -120,6 +120,21 @@ option(DIAG_SECURE_BOOT_BUILD
     OFF
 )
 
+# ---------------------------------------------------------------------------
+# Option: bench-only slow RoutineControl (RID 0xF0F0), as in EDS's basic_ecu
+#
+# A 0x31 routine that answers NRC 0x78 and busy-waits in bounded steps, so the
+# response-pending cadence (0x78 keepalives, P2/P2*) can be measured on this
+# ECU without flash wear [EDS#282]. Default OFF: a normal image has no 0xF0F0.
+# NOT FOR PRODUCTION. Needs an EDS that has the generic response-pending path
+# (EDS#555/#559, after v1.26.1); the configure step says so if the pinned EDS
+# does not.
+# ---------------------------------------------------------------------------
+option(DIAG_BENCH_SLOW_ROUTINE
+    "Bench only: slow 0x31 routine (RID 0xF0F0) for the response-pending path"
+    OFF
+)
+
 if(NOT DIAG_SKIP_CODEGEN AND NOT EXISTS "${DIAG_ROOT}/tools/templates")
     message(STATUS
         "[REF-ECU] Commercial tools/templates/ not present (expected — this "
@@ -301,6 +316,24 @@ if(DIAG_SECURE_BOOT_BUILD)
         ${DIAG_ROOT}/platform/uds_mcuboot_image.c
     )
     target_compile_definitions(app PRIVATE DIAG_SECURE_BOOT_BUILD=1)
+endif()
+
+# ---------------------------------------------------------------------------
+# Bench-only slow routine (DIAG_BENCH_SLOW_ROUTINE), both transports.
+# ---------------------------------------------------------------------------
+if(DIAG_BENCH_SLOW_ROUTINE)
+    if(NOT EXISTS "${DIAG_ROOT}/platform/zephyr/bench_slow_routine.c")
+        message(FATAL_ERROR
+            "\n"
+            "[REF-ECU] ERROR: DIAG_BENCH_SLOW_ROUTINE=ON, but the EDS in "
+            "${DIAG_ROOT} has no platform/zephyr/bench_slow_routine.c.\n"
+            "       The bench routine ships with EDS#559, after v1.26.1. Point "
+            "west.yml's EDS revision at a commit that has it (a local, "
+            "uncommitted change is fine for a bench).\n"
+        )
+    endif()
+    target_sources(app PRIVATE ${DIAG_ROOT}/platform/zephyr/bench_slow_routine.c)
+    target_compile_definitions(app PRIVATE DIAG_BENCH_SLOW_ROUTINE=1)
 endif()
 
 # ---------------------------------------------------------------------------
