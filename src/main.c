@@ -54,7 +54,7 @@
 #if defined(DIAG_SECURE_BOOT_BUILD)
 #include "zephyr_flash_ops.h"              /* zephyr_flash_ops_set_wdt() */
 #include "zephyr_mcuboot_image_policy.h"   /* zephyr_mcuboot_image_policy_init() */
-#include "services.h"                      /* uds_service_0x34_pending_tick() */
+#include "services.h"
 #include <zephyr/dfu/mcuboot.h>            /* boot_is_img_confirmed() et al. */
 #endif
 #if defined(DIAG_BENCH_SLOW_ROUTINE)
@@ -233,8 +233,8 @@ static void diag_task_entry(void *p1, void *p2, void *p3)
         on_tick(&tick_ctx);
         bcm_state_monitor_tick();
 
-#if defined(DIAG_BENCH_SLOW_ROUTINE)
-        /* [EDS#282] Response-pending job: one bounded step per tick; the 0x78
+        /* Response-pending jobs (EDS#282: bench routine 0xF0F0, and 0x34's chunked
+         * erase on secure-boot builds, #19): one bounded step per tick; the 0x78
          * keepalives and the final response come back here. On ISO-TP busy the
          * server returns the same frame next tick. Same lock as the dispatch. */
         {
@@ -249,7 +249,6 @@ static void diag_task_entry(void *p1, void *p2, void *p3)
             }
             (void)diag_mutex_unlock(&s_session_lock);
         }
-#endif
 
         {
             static uds_msg_buf_t s_periodic_frame;
@@ -266,28 +265,6 @@ static void diag_task_entry(void *p1, void *p2, void *p3)
                 }
             }
         }
-
-#if defined(DIAG_SECURE_BOOT_BUILD)
-        {
-            /* [#19] 0x34's chunked erase answers 7F 34 78 and finishes here,
-             * one bounded sector per tick; without this a CAN tester waits
-             * forever after the 0x78. A built frame that ISO-TP refused is
-             * retried as-is: once the final 0x74 is returned the erase is no
-             * longer active, so asking again would lose it. Adapted from
-             * EDS's examples/safeboot_ecu/src/main.c. */
-            static uds_msg_buf_t s_erase_frame;
-            static bool          s_erase_frame_pending = false;
-
-            if (!s_erase_frame_pending) {
-                s_erase_frame_pending = uds_service_0x34_pending_tick(&s_erase_frame);
-            }
-            if (s_erase_frame_pending &&
-                (isotp_transmit(tp, s_erase_frame.data,
-                                (uint32_t)s_erase_frame.length) == UDS_STATUS_OK)) {
-                s_erase_frame_pending = false;
-            }
-        }
-#endif
 
         (void)diag_wdt_feed(&s_wdt);
     }
