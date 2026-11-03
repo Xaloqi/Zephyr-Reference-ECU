@@ -31,8 +31,7 @@ FD=; [ -f can.env ] && . ./can.env
 for v in can0 can1; do ip link add dev $v type vcan; done
 # XAQ_P2_MAX_MS: TCG timing is not the Pi's; p2 is judged on timeouts and bad
 # answers here, not on the 25 ms limit.
-# XAQ_NUCLEO_STANDIN: the NUCLEO is not EDS here, so no EDS#557 expectation for it.
-export XAQ_VIRTUAL=1 XAQ_BACKEND_TYPE= XAQ_LOGDIR=/root/log XAQ_P2_MAX_MS=1000 XAQ_NUCLEO_STANDIN=1
+export XAQ_VIRTUAL=1 XAQ_BACKEND_TYPE= XAQ_LOGDIR=/root/log XAQ_P2_MAX_MS=1000
 export XAQ_CAN_FD=${FD:-0}
 # This rootfs has no /bin/sh (busybox installs sh in /usr/local/bin), so the
 # script's #!/bin/sh cannot run directly; busybox ash is the stricter POSIX shell.
@@ -53,9 +52,8 @@ if [ "$XAQ_CAN_FD" = 1 ]; then
   $B burst link 50 4000
   $B p2load 0 100
   $B burst 0 20
-  # DomZ is EDS: until EDS#557 its FD ISO-TP is not usable from a CANFD_MTU tester,
-  # so the ECU burst row on an FD bus is classic ISO-TP frames (XAQ_FD=0).
-  (export XAQ_FD=0; $B burst 1 20)
+  # DomZ is EDS >= v1.27.0: its FD ISO-TP frames are FD (EDS#557), so burst 1 is FD too.
+  $B burst 1 20
 fi
 echo "=== DIAG bench logs"
 for f in /run/xaloqi-can/*.log; do echo "--- $f"; tail -15 $f; done

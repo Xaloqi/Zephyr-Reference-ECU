@@ -78,11 +78,10 @@ refuses a classic DomZ-CAN for the FD HAT and the other way round. In DomD,
 `burst` / `p2load` measure ISO-TP burst traffic on it. One HAT at a time: both
 use RP1 SPI0 CE0 and GPIO25.
 
-Known limits, EDS side: with CAN FD, EDS sends Single Frames of up to 7 bytes,
-FF/CF and its Flow Control as classic frames, and never BRS. A Linux CAN FD
-ISO-TP socket drops those frames (EDS#557). Before v1.26.0 (#542) the unanswered
-classic FF leaves EDS's TX channel in error, and the ECU goes mute (EDS#541): the
-xenvm pin (v1.23.0) has that.
+EDS side: from v1.27.0 an FD-mode EDS sends every frame (SF, FF, CF, FC) as a CAN FD
+frame (EDS#557), which a Linux CAN FD ISO-TP socket accepts; BRS is not set by this
+ECU (see `src/main.c`). Before v1.26.0 the ECU went mute after an unanswered classic
+FF (EDS#541); both bench ECUs now pin v1.27.0.
 
 ## Rehearse it without the board
 

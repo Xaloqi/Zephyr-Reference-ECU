@@ -72,8 +72,8 @@
  * -------------------------------------------------------------------------- */
 #include "bcm_state.h"
 
-/* [EDS#558] EDS defines the RX queue depth from the November release on; the
- * pinned v1.26.1 hard-codes the same 8 frames in zephyr_can.c. */
+/* [EDS#558] EDS defines the RX queue depth from v1.27.0 on (default 32); this
+ * fallback only covers an older pin. */
 #ifndef EDS_CAN_RX_QUEUE_DEPTH
 #define EDS_CAN_RX_QUEUE_DEPTH (8U)
 #endif
@@ -465,12 +465,11 @@ int main(void)
 
 #if defined(DIAG_CAN_FD)
     /* -DDIAG_CAN_FD=ON (the Pi 5 CAN FD bench): EDS's ISO-TP is built with
-     * ISOTP_ENABLE_CAN_FD, but the generated init leaves use_fd false. With it
-     * set, Single Frames of 8..62 bytes go out as CAN FD frames, and requests
-     * at any FD TX_DL are received. Multi-frame responses still use 8-byte
-     * classic FF/CF, and nothing sets BRS (EDS v1.25.0; EDS#557). */
+     * ISOTP_ENABLE_CAN_FD, but the committed generated init leaves use_fd false
+     * (it predates can.fd: true). With it set, EDS v1.27.0 sends every frame
+     * (SF, FF, CF, FC) as an FD frame; BRS stays off (tp->brs, EDS#557). */
     tp->use_fd = true;
-    LOG_INF("CAN FD: FDCAN1 FD mode, ISO-TP use_fd (TX: FD SF 8..62 B, FF/CF classic)");
+    LOG_INF("CAN FD: FDCAN1 FD mode, ISO-TP use_fd (every TX frame FD, no BRS)");
 #endif
 
     (void)uds_periodic_init();

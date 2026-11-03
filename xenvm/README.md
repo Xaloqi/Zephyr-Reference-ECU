@@ -80,9 +80,8 @@ it with CAN FD (`-DDIAG_CAN_FD=ON`: `CONFIG_CAN_FD_MODE` and EDS's ISO-TP with C
 and runs DomD's buses at MTU 72 with a CAN FD tester (TX_DL 64, BRS). The check then
 judges the virtio-can transport on the wire: FD negotiated, DomZ's FD frames on vcan0,
 DomZ reacting to an FD Single Frame and an FD First Frame. At the ISO-TP level only the
-answers EDS sends as FD Single Frames reach a CAN FD tester (EDS#557), and with the
-pinned EDS v1.23.0 the first unanswered multi-frame response leaves DomZ mute (EDS#541,
-fixed in v1.26.0): the FD run fails on that, by design, until the pin moves.
+answers reach a CAN FD tester, multi-frame ones included, because EDS v1.27.0 sends every
+frame of its FD channel as an FD frame (EDS#557, EDS#541).
 
 The CAN parts are built in a second image, `xaloqi-zre-xenvm-can:1`. It is the builder
 image plus the Rust toolchain of the `rust` image pinned in [`versions.env`](versions.env),

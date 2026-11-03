@@ -21,8 +21,9 @@
  *    terminals is not a characterised harness. 5 Mbit/s (16 tq here, 8 tq on
  *    the MCP2518FD) is the next step once 2 Mbit/s runs clean.
  *
- * EDS v1.25.0 never sets BRS on what it sends (EDS#557), so this data phase
- * is used for frames the ECU receives; its own FD frames go at 500 kbit/s.
+ * This ECU does not set BRS on what it sends (tp->brs stays false, src/main.c;
+ * EDS v1.27.0 can, via can.fd_brs), so this data phase is used for frames the
+ * ECU receives; its own FD frames go at 500 kbit/s.
  * =============================================================================
  */
 

@@ -15,12 +15,11 @@ mode; DomZ's FD frames longer than 8 bytes are on DomD's vcan0 (out of DomZ);
 and DomZ reacted to both FD-only requests, a 9-byte FD Single Frame (its
 response's first frame follows it) and a 64-byte FD First Frame (its Flow
 Control follows it), so FD frames went into DomZ.
-At the ISO-TP level EDS v1.23-v1.26 (EDS#557) sends classic-format frames on its
-FD channel: SFs up to 7 bytes, FF/CF and FC. A Linux CAN_ISOTP socket with
-CANFD_MTU drops every frame that is not CANFD_MTU (net/can/isotp.c:
-'if (skb->len != so->ll.mtu) return;'). So exactly FD_ANSWERED must be answered
-and FD_EDS557 must time out. Anything else fails, including FD_EDS557 being
-answered: then EDS#557 is fixed and these two lists must change.
+At the ISO-TP level EDS v1.27.0 (EDS#557) sends every frame of its FD channel as an
+FD frame (SF, FF, CF and FC), so a Linux CAN_ISOTP socket with CANFD_MTU, which
+drops every frame that is not CANFD_MTU (net/can/isotp.c: 'if (skb->len !=
+so->ll.mtu) return;'), gets every answer. Every request must be answered; an
+unanswered one fails the boot.
 """
 import re
 import sys
@@ -92,10 +91,8 @@ def common(n, lines, errors):
 
 # As isotp_probe.py prints them (over 24 bytes: "<SID> <pattern> x<n>").
 FD_REQS = ("22" + " f1 90" * 4, "22 f1 90 x33")
-# Answered with CAN FD frames only (FD Single Frames of 8..62 bytes).
-FD_ANSWERED = ("22 f1 90", "27 01")
-# Answered with a classic frame (SF <= 7 B, FF/CF, or EDS's FC): EDS#557.
-FD_EDS557 = ("3e 00", "10 03") + FD_REQS
+# Every request of the FD run must be answered: with EDS >= v1.27.0 all TX frames are FD.
+FD_ALL = ("3e 00", "10 03", "22 f1 90", "27 01") + FD_REQS
 
 
 def is_fd_run(lines):
@@ -110,9 +107,9 @@ def judge_fd(n, lines, ex, req, rsp, errors):
     if not any(re.match(r"WIRE vcan0 %s \[(1[2-9]|[2-6][0-9])\] FD" % rsp, l) for l in lines):
         errors.append("boot %d: no CAN FD frame longer than 8 bytes from DomZ (0x%s) on vcan0" % (n, rsp))
     w = [l for l in lines if l.startswith("WIRE vcan0 ")]
-    for pat, then, what in ((r"WIRE vcan0 %s \[12\] FDBRS 00 09 22" % req, r"WIRE vcan0 %s \[8\] 10 " % rsp,
+    for pat, then, what in ((r"WIRE vcan0 %s \[12\] FDBRS 00 09 22" % req, r"WIRE vcan0 %s \[64\] FD 10 " % rsp,
                              "the 9-byte FD Single Frame"),
-                            (r"WIRE vcan0 %s \[64\] FDBRS 10 43 22" % req, r"WIRE vcan0 %s \[3\] 30 " % rsp,
+                            (r"WIRE vcan0 %s \[64\] FDBRS 10 43 22" % req, r"WIRE vcan0 %s \[3\] FD 30 " % rsp,
                              "the 64-byte FD First Frame")):
         i = next((k for k, l in enumerate(w) if re.match(pat, l)), None)
         if i is None:
@@ -122,16 +119,12 @@ def judge_fd(n, lines, ex, req, rsp, errors):
     got = {}
     for q, r in ex:
         got.setdefault(q, []).append(r)
-    for q in FD_ANSWERED:
-        if any(r == "TIMEOUT" for r in got.get(q, ["TIMEOUT"])):
-            errors.append("boot %d: %s unanswered (its answer is CAN FD only)" % (n, q))
-    for q in FD_EDS557:
+    for q in FD_ALL:
         rs = got.get(q)
         if rs is None:
             errors.append("boot %d: %s not sent" % (n, q.split()[0] + " ..."))
-        elif any(r != "TIMEOUT" for r in rs):
-            errors.append("boot %d: %s answered: EDS#557 looks fixed, update FD_EDS557 in check_can.py"
-                          % (n, q[:20]))
+        elif any(r == "TIMEOUT" for r in rs):
+            errors.append("boot %d: %s unanswered (EDS >= v1.27.0 answers on the FD channel)" % (n, q[:20]))
 
 
 def judge(n, lines, errors):
@@ -140,7 +133,7 @@ def judge(n, lines, errors):
     ex = uds(lines)
     if is_fd_run(lines):
         judge_fd(n, lines, ex, req, rsp, errors)
-        # The rest of judge() is the classic exchange; EDS#557 times half of it out.
+        # The rest of judge() is the classic exchange.
         if not any("SecurityAccess seeds from entropy device" in l for l in lines):
             errors.append("boot %d: EDS did not register the entropy seed callback" % n)
         return [r.split()[2:] for q, r in ex if q == "27 01" and r.startswith("67 01") and len(r.split()) == 10]
@@ -244,9 +237,8 @@ def main():
     print("PASS: DomZ (EDS on Zephyr + Xaloqi/zephyr-virtio-can) answered UDS over ISO-TP on DomD's "
           "vcan0 through virtio-can on %d boots (%s%s), seed nonces all "
           "differ, and the canary boot (backend on vcan9) answered nothing"
-          % (len(seeds), "22 F190, 27 01 x2" if fd else "3E, 10 03, 22 F190, 27 01 x2", "; CAN FD: virtio-can negotiated FD and carried FD frames both ways; the ISO-TP answers EDS sends "
-             "as classic frames (EDS#557: 3E, 10 03, 22 x4, 22 x33) timed out at the CANFD_MTU tester, as "
-             "expected" if fd else ""))
+          % (len(seeds), "3E, 10 03, 22 F190, 27 01 x2" + (", 22 x4, 22 x33" if fd else ""), "; CAN FD: virtio-can negotiated FD and carried FD frames both ways, and every ISO-TP "
+             "answer, multi-frame ones included, reached the CANFD_MTU tester" if fd else ""))
     return 0
 
 

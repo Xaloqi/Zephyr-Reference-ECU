@@ -63,5 +63,5 @@ if errors:
     print("FAIL: " + "; ".join(errors)); sys.exit(1)
 print("PASS: xaloqi-can-bench ran up, nucleo (stand-in), domz (virtio-can, ECU 1, across the "
       "bridged bus), p2 for both ECUs, %scanary (DomZ silent, stand-in answered) and down"
-      % ("CAN FD (MTU 72): burst link, p2load 0, burst 0, burst 1 (classic ISO-TP, EDS#557), " if fd else ""))
+      % ("CAN FD (MTU 72): burst link, p2load 0, burst 0, burst 1, " if fd else ""))
 EOF

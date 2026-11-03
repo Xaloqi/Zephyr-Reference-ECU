@@ -99,29 +99,16 @@ probe() { # <req> <rsp> <log>
   cat "$3.wire"
 }
 
-answered() { # <log> [full]: every request answered (no TIMEOUT), 5 exchanges
-  # "full": the ECU is not EDS (the QEMU rehearsal's stand-in NUCLEO), so no EDS#557.
-  if [ "$XAQ_CAN_FD" = 1 ] && [ "${2:-}" != full ]; then
-    # EDS#557: an FD-mode EDS sends SFs <= 7 B, FF/CF and FC as classic frames,
-    # which a CANFD_MTU ISO-TP socket drops (net/can/isotp.c). Until it is fixed
-    # exactly its FD-only answers come back: 22 F190 and 27 01 x2 (FD SFs), and
-    # 3E 00, 10 03, 22 x4, 22 x33 time out (as xenvm/scripts/check_can.py).
-    for q in "22 f1 90" "27 01"; do
-      grep "^UDS $q -> " "$1" | grep -q TIMEOUT && return 1
-      grep -q "^UDS $q -> " "$1" || return 1
-    done
-    for q in "3e 00" "10 03" "22 f1 90 f1 90 f1 90 f1 90" "22 f1 90 x33"; do
-      grep -q "^UDS $q -> TIMEOUT" "$1" || { echo "NOTE: '$q' answered: EDS#557 fixed? update answered()"; return 1; }
-    done
-    return 0
-  fi
+answered() { # <log>: every request answered (no TIMEOUT), 5 exchanges
+  # With CAN FD, EDS >= v1.27.0 sends every frame (SF, FF, CF, FC) as an FD frame
+  # (EDS#557), so a CANFD_MTU ISO-TP socket gets every answer.
   [ "$(grep -c '^UDS ' "$1")" -ge 5 ] && ! grep -q 'TIMEOUT' "$1"
 }
 
 nucleo() {
   L=$LOGDIR/nucleo-$(ts).log
   probe 7E0 7E8 "$L"
-  answered "$L" ${XAQ_NUCLEO_STANDIN:+full} || fail "NUCLEO did not answer every request ($L)"
+  answered "$L" || fail "NUCLEO did not answer every request ($L)"
   grep -q 'WIRE can1 7E8 ' "$L.wire" || fail "no 0x7E8 frame on $TESTER"
   pass "NUCLEO (ECU 0) answered 3E/10 03/22 F190/27 01 x2 over the physical bus ($L)"
 }
@@ -226,7 +213,7 @@ canary() {
   # Positive control: the bus itself still works.
   L2=$LOGDIR/canary-nucleo-$(ts).log
   probe 7E0 7E8 "$L2"
-  answered "$L2" ${XAQ_NUCLEO_STANDIN:+full} || fail "NUCLEO did not answer during the canary: the bus is down, canary inconclusive"
+  answered "$L2" || fail "NUCLEO did not answer during the canary: the bus is down, canary inconclusive"
   pass "backend on vcan9: $NAME silent, NUCLEO answered ($L, $L2)"
 }
 
