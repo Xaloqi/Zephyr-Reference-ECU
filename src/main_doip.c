@@ -136,7 +136,7 @@
 #if defined(DIAG_SECURE_BOOT_BUILD)
 #include "zephyr_flash_ops.h"              /* zephyr_flash_ops_init/_set_wdt() */
 #include "zephyr_mcuboot_image_policy.h"   /* zephyr_mcuboot_image_policy_init() */
-#include "services.h"                      /* uds_service_0x34_pending_tick() */
+#include "services.h"
 #include <zephyr/dfu/mcuboot.h>            /* boot_is_img_confirmed() et al. */
 #endif
 #if defined(DIAG_BENCH_SLOW_ROUTINE)
@@ -475,11 +475,6 @@ int main(void)
                 "boot_request_upgrade on accept). Authenticity comes "
                 "entirely from MCUboot's own RSA-2048-PSS signature check.");
     }
-
-    /* RequestDownload erases in 128 KB steps behind 7F 34 78. Over DoIP
-     * nothing finishes them unless the server has this continuation
-     * (EDS#423). It also restarts S3 on every frame it produces (EDS#435). */
-    eds_doip_set_pending_callback(uds_service_0x34_pending_tick);
 #endif
 
     if ((diag_mutex_init(&s_session_lock)  != UDS_STATUS_OK) ||
