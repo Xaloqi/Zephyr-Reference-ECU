@@ -26,7 +26,7 @@ manifest:
 
     - name: EDS
       remote: xaloqi
-      revision: e708b2490597454dde39e22dd614089df4045fb3   # v1.26.1
+      revision: 8a54fe8dbef306014b90b8ca7d9ef92459403dca   # v1.27.0
       path: modules/xaloqi-eds
 
     # The virtio-can driver for the CAN variant (xenvm/run.sh can). An ordinary
