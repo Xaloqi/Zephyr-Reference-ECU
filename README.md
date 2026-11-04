@@ -13,6 +13,12 @@ west build -b native_sim .
 ./build/zephyr/zephyr.exe
 ```
 
+![Building Zephyr-Reference-ECU for native_sim, booting it (UDS stack ready: 7 DIDs, 2 DTCs), then the free xaloqi-tester campaign on its virtual ECU: 19/19 steps pass](docs/assets/zre-in-60-seconds.gif)
+
+*A real run (2026-11-04, ZRE `main` on EDS v1.27.0). The cold `west update` is cut and the compile plays at 2×.
+The campaign runs on TestLab's built-in virtual ECU, not on this firmware: see
+[What CI does and does not prove](#what-ci-does-and-does-not-prove).*
+
 That's a complete, running ECU: door-lock state, a window-position monitor,
 two fault conditions, two RoutineControl actuations, and ISO 14229 (UDS)
 diagnostics over CAN/ISO-TP — all of it on your laptop, no hardware
