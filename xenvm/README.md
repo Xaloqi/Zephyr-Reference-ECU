@@ -153,10 +153,10 @@ of cpus`, `getting physinfo: Operation not permitted`, and no DomZ.
 | Console | xenconsoled in DomD, `/tool/xenconsoled/domid = 1` | the same, plus a console seeder their Zephyr xenstore needs |
 | DomZ | SoDeV's `domz.cfg` ([`harness/domz.cfg`](harness/domz.cfg), only the kernel path changed) + `virtio=` | `virtio = []`, no device model |
 | Zephyr | **v4.4.1 `1f6485ec`**, SDK 1.0.1, board `xenvm` (GICv2) | the same SHA |
-| EDS | **v1.27.0** `8a54fe8` | not present |
+| EDS | **v1.28.0** `8b747d7` | not present |
 | Machine | QEMU 10.0 `virt`, cortex-a57, 4 CPUs, 4 GiB, TCG | Raspberry Pi 5 / 4 (Cortex-A76 / A72, GIC-400) |
 
-EDS is pinned to the v1.27.0 release. The committed `generated/` sources call EDS APIs newer than v1.23.0, so the pin moved past it. The AGL post and the blog article cite v1.23.0, the release they were run on. A later EDS release is adopted when it changes something this build uses, or when something new about xenvm is published; the full `run.sh` is then re-run and the article updated in the same change.
+EDS is pinned to the v1.28.0 release. The committed `generated/` sources call EDS APIs newer than v1.23.0, so the pin moved past it. The AGL post and the blog article cite v1.23.0, the release they were run on. A later EDS release is adopted when it changes something this build uses, or when something new about xenvm is published; the full `run.sh` is then re-run and the article updated in the same change.
 
 ## Honest gaps
 
