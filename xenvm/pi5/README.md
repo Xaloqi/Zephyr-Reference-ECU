@@ -1,7 +1,8 @@
 # xenvm/pi5: virtio-can on a real Raspberry Pi 5 (SoDeV CAN architecture A)
 
-**State: prepared, not yet run on hardware.** Everything here builds and is rehearsed
-under QEMU. Nothing has touched a Pi 5 yet.
+**State: run on hardware, 2026-11-09** (classic CAN and CAN FD, one Pi 5, SoDeV image
+`dc2755f6`). Every functional step passes; see [Results](#results-2026-11-09) for the
+timing, the bench notes, the known issues and what was not measured.
 
 The Pi 5 version of [`run.sh can`](../README.md#the-can-variant-runsh-can). It starts
 from AGL SoDeV's own Pi 5 image
@@ -82,6 +83,90 @@ EDS side: from v1.27.0 an FD-mode EDS sends every frame (SF, FF, CF, FC) as a CA
 frame (EDS#557), which a Linux CAN FD ISO-TP socket accepts; BRS is not set by this
 ECU (see `src/main.c`). Before v1.26.0 the ECU went mute after an unanswered classic
 FF (EDS#541); both bench ECUs now pin v1.27.0.
+
+## Results (2026-11-09)
+
+One bench session: classic CAN (2-CH isolated CAN HAT, 2 x MCP2515, 16 MHz) in the morning,
+CAN FD (2-CH CAN FD HAT, 2 x MCP2518FD, 40 MHz) in the afternoon. SoDeV `dc2755f6`
+(`./build.sh -z --ram=8g`), EDS v1.27.0, Zephyr 4.4.1, zephyr-virtio-can v0.2.0. The NUCLEO
+(ECU 0) is this repo's default build. A CANable in listen-only mode confirmed every step from
+outside the Pi.
+
+**Functional: every step passes, classic and FD.** Xen 4.22 boot, both HAT channels up in
+DomD (500 kbit/s, 87.5 %; FD data phase 2 Mbit/s, 80 %), wire self-test, UDS to the NUCLEO,
+UDS to EDS in the Zephyr DomZ-CAN across the physical bus (ECU 1), and the canary (backend on
+a virtual bus: DomZ-CAN silent, NUCLEO answering, 0 frames on 0x7E9). On FD every ISO-TP frame of
+every DomZ-CAN answer is an FD frame, including a 628-byte one.
+
+**CAN FD burst: 0 of 32,000 frames lost** (500 back-to-back ISO-TP messages of 4,000 bytes
+between the HAT's two channels, BS 0 / STmin 0; no bus errors, no rx overruns). Against
+DomZ-CAN, 200 requests that each return 628 bytes: none lost, no response frame missing.
+
+**P2** (TesterPresent, 1,000 requests per run, 20 ms apart, a fresh DomZ-CAN boot per run,
+DomD idle; measured at the tester's controller, own echo to answer, one kernel clock). The
+ReferenceBCM's P2 is 25 ms; ISO 14229's typical 50 ms was never exceeded (largest value
+46.0 ms). All 12,000 classic and 6,000 FD requests were answered.
+
+| Classic CAN | Runs | Median | p99 | Max |
+|---|---|---|---|---|
+| NUCLEO, bare metal | 6 | 0.28-0.35 ms | 1.2 ms | 1.3 ms (two runs: 7.0 and 2.4 ms) |
+| DomZ-CAN, pCPU 0 (SoDeV's `domz.cfg`) | 3 | 1.7-4.5 ms | 11.5-14.2 ms | 21.0-21.4 ms |
+| DomZ-CAN, pCPU 3 | 3 | 0.47-1.27 ms | 3.9-4.9 ms | 5.9-8.1 ms |
+
+An earlier set of three pCPU 0 runs, before the tool fix below, had a max of 46.0 / 23.5 /
+24.2 ms.
+
+| CAN FD (2 Mbit/s data) | Runs | Median | p99 | Max |
+|---|---|---|---|---|
+| DomZ-CAN, pCPU 0 | 3 | 0.98-3.15 ms | 13.4-18.0 ms | 19.7-32.3 ms (two runs over 25 ms) |
+| DomZ-CAN, pCPU 3 | 3 | 1.52 ms | 4.3-4.6 ms | 8.2-20.5 ms |
+
+The NUCLEO's two outliers fell in runs where the tool had to use the send time instead of the
+echo, which overstates P2, so part of them may be the tool's. On both classic and FD, where
+DomZ-CAN runs matters more than the virtio-can path: on pCPU 0 it shares a core with Dom0
+and DomD's vCPU 0, and its tail is about three times longer than on a core of its own.
+
+### Pinning DomZ-CAN
+
+`XAQ_DOMZ_CPUS` replaces the `cpus =` line of SoDeV's `domz.cfg` in the config
+`xaloqi-can-bench` builds for DomZ-CAN. Set it in DomD on the step that starts DomZ-CAN:
+
+```sh
+XAQ_DOMZ_CPUS=3 xaloqi-can-bench domz     # pCPU 3; unset keeps domz.cfg's "0"
+xaloqi-can-bench p2 1                     # ECU 1 = DomZ-CAN
+```
+
+pCPU 3 was free because this image has no Android domain; with one, pick a core nobody
+else uses.
+
+### Bench notes
+
+- The backend is `backend=1`: in SoDeV's image DomD is `Dom0less-1` in xenstore, so
+  `backend=DomD` does not resolve.
+- Flash the NUCLEO with openocd connect-under-reset, or it fails with "examination failed /
+  Unable to reset target":
+  `openocd -f interface/stlink.cfg -c "reset_config srst_only srst_nogate connect_assert_srst" -f target/stm32h7x.cfg -c "program zephyr.hex verify reset exit"`.
+- On the mcp251x driver a fast ECU's answer can arrive before the echo of the tester's own
+  request. `xaloqi-can-bench p2` waits for the echo and, if it comes after the answer, uses the
+  send time (`echo_late` in its output).
+- Bus ground is the isolated HAT's **G** to the transceiver's GND, not the Pi's.
+
+### Known issues
+
+- A destroyed DomZ-CAN domain stays "dying" (one per create/destroy cycle). At teardown
+  xen-vhost-frontend's threads panic (`src/main.rs:85:56`), the likeliest reason foreign
+  mappings are not released. Not investigated.
+- DomD's `flat L2 bridge activation` unit fails at boot (SoDeV's networking). It does not
+  affect CAN.
+- vhost-device-can's reader busy-polls a DomD vCPU while a backend runs
+  ([rust-vmm/vhost-device#1009](https://github.com/rust-vmm/vhost-device/issues/1009)).
+- VIRTIO 1.4 has no bit for bitrate switching, so DomZ-CAN's FD frames go out without BRS
+  (the tester's frames have it).
+
+### Not measured
+
+DomD under load, an Android domain, the NUCLEO on CAN FD (its SN65HVD230 is a classic
+transceiver), and the polling path. P2 under burst load (`p2load`) needs the NUCLEO on FD.
 
 ## Rehearse it without the board
 
