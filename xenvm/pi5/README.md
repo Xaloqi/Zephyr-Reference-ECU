@@ -82,7 +82,7 @@ use RP1 SPI0 CE0 and GPIO25.
 EDS side: from v1.27.0 an FD-mode EDS sends every frame (SF, FF, CF, FC) as a CAN FD
 frame (EDS#557), which a Linux CAN FD ISO-TP socket accepts; BRS is not set by this
 ECU (see `src/main.c`). Before v1.26.0 the ECU went mute after an unanswered classic
-FF (EDS#541); both bench ECUs now pin v1.27.0.
+FF (EDS#541); both bench ECUs now pin v1.28.0.
 
 ## Results (2026-11-09)
 
