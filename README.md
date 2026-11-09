@@ -418,8 +418,9 @@ seed:
 - **All 6 DIDs read.** The three standard identity DIDs return the
   generated stub's deterministic zeros (same as every EDS example until
   an integrator replaces the stub). `BCM_DoorCycleCount` read back `1`
-  correctly after one earlier `DoorLockAll` — see [Storage](#storage) for
-  why it won't survive a reset yet.
+  correctly after one earlier `DoorLockAll`, and it also survives a real
+  reset — see [Storage](#storage). The seventh DID in the table, `0xF100`,
+  is CDA-interop-only and was not part of this run.
 
 Not yet exercised this way: DID write-then-fault-clear for the identity
 DIDs (not applicable — they're read-only). A reset/reboot cycle *was*
