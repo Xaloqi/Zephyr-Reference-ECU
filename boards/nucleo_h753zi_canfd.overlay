@@ -1,0 +1,33 @@
+/*
+ * =============================================================================
+ * Xaloqi Zephyr-Reference-ECU
+ * boards/nucleo_h753zi_canfd.overlay
+ *
+ * Added by -DDIAG_CAN_FD=ON (CMakeLists.txt), after nucleo_h753zi.overlay:
+ * the CAN FD data phase of FDCAN1 for the Pi 5 CAN FD bench. The arbitration
+ * phase stays 500 kbit/s at 87.5 %, so the bus, the IDs and the classic-CAN
+ * tester settings are unchanged.
+ *
+ * Data phase: 2 Mbit/s at 80 %.
+ *  - FDCAN1's kernel clock is PLL2Q = 8 MHz HSE / 4 * 120 / 3 = 80 MHz
+ *    (nucleo_h753zi board DT, FDCAN_SEL), so 2 Mbit/s is 40 tq with prescaler
+ *    1, and 80 % is exact. Zephyr's m_can driver turns on transmitter delay
+ *    compensation by itself at that prescaler.
+ *  - The Waveshare 2-CH CAN FD HAT (MCP2518FD, 40 MHz) gets 20 tq at 2 Mbit/s,
+ *    80 % exact too: DomD's `ip link set canX ... dbitrate 2000000
+ *    dsample-point 0.8 fd on`.
+ *  - 2 Mbit/s, not more: the transceiver on this end has to be FD-rated (the
+ *    SN65HVD230 is specified to 1 Mbit/s), and a bench of jumper wire and screw
+ *    terminals is not a characterised harness. 5 Mbit/s (16 tq here, 8 tq on
+ *    the MCP2518FD) is the next step once 2 Mbit/s runs clean.
+ *
+ * This ECU does not set BRS on what it sends (tp->brs stays false, src/main.c;
+ * EDS v1.27.0 can, via can.fd_brs), so this data phase is used for frames the
+ * ECU receives; its own FD frames go at 500 kbit/s.
+ * =============================================================================
+ */
+
+&fdcan1 {
+	bitrate-data      = <2000000>;
+	sample-point-data = <800>;
+};

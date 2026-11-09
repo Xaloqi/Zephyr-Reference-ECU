@@ -8,7 +8,9 @@
 # tester stays on vcan0, so nothing may answer. ../scripts/check_can.py judges.
 # N comes from /root/can.env (BOOTS, default 2).
 cd /root
-BOOTS=2; [ -f can.env ] && . ./can.env
+BOOTS=2; ECU=; FD=; [ -f can.env ] && . ./can.env
+# ISO 15765-4 ECU #n (XENVM_CAN_ECU_INDEX): request 0x7E0+n, response 0x7E8+n.
+REQ=$(printf %03X $((0x7E0 + ${ECU:-0}))); RSP=$(printf %03X $((0x7E8 + ${ECU:-0})))
 LAST=$((BOOTS + 1))
 
 echo "=== xl info (DomD is the toolstack)"
@@ -27,7 +29,11 @@ XENCONSOLED_TRACE=guest /usr/sbin/xenconsoled --pid-file=/run/xenconsoled.pid \
 # protocol is on /dev/xen/xenbus; xs-sock-relay.py serves one from the other.
 python3 xs-sock-relay.py > relay.log 2>&1 &
 for i in $(seq 1 50); do [ -S /var/run/xenstored/socket ] && break; sleep 0.1; done
-for v in vcan0 vcan9; do ip link add dev $v type vcan && ip link set $v up; done
+# FD (XENVM_CAN_FD=1): the buses carry CAN FD frames (CANFD_MTU 72); the tester and
+# the wire dump switch to FD.
+MTU=16; [ -n "${FD:-}" ] && MTU=72
+for v in vcan0 vcan9; do ip link add dev $v type vcan && ip link set $v mtu $MTU && ip link set $v up; done
+echo "=== buses: vcan0/vcan9 mtu $MTU${FD:+ (CAN FD)}"
 
 sed '/^virtio = \[\]/d' domz.cfg > domz-can.cfg
 cat >> domz-can.cfg <<'CFG'
@@ -63,8 +69,8 @@ for boot in $(seq 1 $LAST); do
     python3 can_dump.py vcan0 60 200 WIRE > wire-$boot.log 2>&1 &
     W=$!
     sleep 0.5
-    echo "--- ISO-TP tester (DomD vcan0, 0x7E0 -> EDS in DomZ, 0x7E8 back)"
-    timeout 40 python3 isotp_probe.py vcan0
+    echo "--- ISO-TP tester (DomD vcan0, 0x$REQ -> EDS in DomZ, 0x$RSP back)"
+    timeout 40 python3 isotp_probe.py vcan0 $REQ $RSP ${FD:+fd}
     sleep 1; kill $W 2>/dev/null; wait $W 2>/dev/null
     xl list | grep -E "^(Name|DomZ) "
     echo "--- wire (vcan0)"; cat wire-$boot.log

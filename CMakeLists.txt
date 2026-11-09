@@ -21,6 +21,32 @@
 
 cmake_minimum_required(VERSION 3.20.0)
 
+# ---------------------------------------------------------------------------
+# Option: CAN FD (the Pi 5 CAN FD bench), CAN build only
+#
+#   nucleo_h753zi: FDCAN1 in CAN FD mode with a 2 Mbit/s data phase
+#                  (boards/nucleo_h753zi_canfd.*; arbitration unchanged at 500 kbit/s)
+#   xenvm:         CAN FD over virtio-can (boards/xenvm_can_fd.conf; xenvm/run.sh can
+#                  with XENVM_CAN_FD=1)
+# and, on both, EDS's ISO-TP built with CAN FD (ISOTP_ENABLE_CAN_FD, use_fd set
+# in src/main.c). Off by default, so the default images are unchanged. Must come
+# before find_package(Zephyr), which reads the extra conf and overlay.
+# ---------------------------------------------------------------------------
+option(DIAG_CAN_FD "CAN FD on the CAN controller and in ISO-TP (nucleo_h753zi, xenvm)" OFF)
+if(DIAG_CAN_FD)
+    if(DIAG_DOIP_ONLY_BUILD)
+        message(FATAL_ERROR "[REF-ECU] DIAG_CAN_FD is a CAN option; it cannot combine with DIAG_DOIP_ONLY_BUILD.")
+    endif()
+    if(BOARD MATCHES "^nucleo_h753zi")
+        list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/nucleo_h753zi_canfd.conf)
+        list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/nucleo_h753zi_canfd.overlay)
+    elseif(BOARD MATCHES "^xenvm")
+        list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/xenvm_can_fd.conf)
+    else()
+        message(FATAL_ERROR "[REF-ECU] DIAG_CAN_FD is defined for nucleo_h753zi and xenvm only (got '${BOARD}').")
+    endif()
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(zephyr_reference_ecu
@@ -134,6 +160,29 @@ option(DIAG_BENCH_SLOW_ROUTINE
     "Bench only: slow 0x31 routine (RID 0xF0F0) for the response-pending path"
     OFF
 )
+
+# DIAG_CAN_FD (declared before find_package above): every EDS source is compiled
+# into this app target, so all of them see the same ISOTP_ENABLE_CAN_FD, which
+# changes isotp_ctx_t's layout.
+if(DIAG_CAN_FD)
+    target_compile_definitions(app PRIVATE ISOTP_ENABLE_CAN_FD=1 DIAG_CAN_FD=1)
+endif()
+
+# ---------------------------------------------------------------------------
+# DIAG_CAN_ECU_INDEX — ISO 15765-4 physical address pair of this ECU (CAN build).
+# Unset (the default): the generated response ID (0x7E8) and physical request ID
+# 0x7E0, so every existing image is unchanged. 0..7: request 0x7E0+n, response
+# 0x7E8+n, so two of these ECUs can share one bus (the Pi 5 bench runs the
+# NUCLEO as ECU 0 and the xenvm DomZ as ECU 1). The functional ID 0x7DF stays
+# shared, as ISO 15765-4 intends: each ECU answers it on its own response ID.
+# ---------------------------------------------------------------------------
+set(DIAG_CAN_ECU_INDEX "" CACHE STRING "ISO 15765-4 ECU index 0..7 (empty: generated IDs)")
+if(NOT DIAG_CAN_ECU_INDEX STREQUAL "")
+    if(NOT DIAG_CAN_ECU_INDEX MATCHES "^[0-7]$")
+        message(FATAL_ERROR "DIAG_CAN_ECU_INDEX must be 0..7, got '${DIAG_CAN_ECU_INDEX}'")
+    endif()
+    target_compile_definitions(app PRIVATE DIAG_CAN_ECU_INDEX=${DIAG_CAN_ECU_INDEX}U)
+endif()
 
 if(NOT DIAG_SKIP_CODEGEN AND NOT EXISTS "${DIAG_ROOT}/tools/templates")
     message(STATUS

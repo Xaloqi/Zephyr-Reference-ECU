@@ -72,8 +72,8 @@
  * -------------------------------------------------------------------------- */
 #include "bcm_state.h"
 
-/* [EDS#558] EDS defines the RX queue depth from the November release on; the
- * pinned v1.26.1 hard-codes the same 8 frames in zephyr_can.c. */
+/* [EDS#558] EDS defines the RX queue depth from v1.27.0 on (default 32); this
+ * fallback only covers an older pin. */
 #ifndef EDS_CAN_RX_QUEUE_DEPTH
 #define EDS_CAN_RX_QUEUE_DEPTH (8U)
 #endif
@@ -99,7 +99,15 @@ LOG_MODULE_REGISTER(reference_bcm, LOG_LEVEL_INF);
 
 #define DIAG_CAN_DEV         DEVICE_DT_GET(DT_ALIAS(can0))
 #define DIAG_RX_CAN_ID       ((uint32_t)GEN_CAN_RX_ID)   /* 0x7DF */
+#if defined(DIAG_CAN_ECU_INDEX)
+/* ISO 15765-4 ECU #n (CMake DIAG_CAN_ECU_INDEX): request 0x7E0+n, response
+ * 0x7E8+n. Lets two of these ECUs share one bus (see CMakeLists.txt). */
+#define DIAG_TX_CAN_ID       (0x7E8U + (uint32_t)DIAG_CAN_ECU_INDEX)
+#define DIAG_PHYS_RX_CAN_ID  (0x7E0U + (uint32_t)DIAG_CAN_ECU_INDEX)
+#else
 #define DIAG_TX_CAN_ID       ((uint32_t)GEN_CAN_TX_ID)   /* 0x7E8 */
+#define DIAG_PHYS_RX_CAN_ID  (0x7E0U)
+#endif
 
 #ifndef CONFIG_DIAG_TASK_STACK_SIZE
 #define CONFIG_DIAG_TASK_STACK_SIZE   (4096U)
@@ -347,7 +355,7 @@ int main(void)
              * will not treat a functional-only ECU as discoverable (same
              * precedent as EDS's own examples/basic_ecu). See README.md
              * "Phase 3". */
-            .physical_rx_id = 0x7E0U,
+            .physical_rx_id = DIAG_PHYS_RX_CAN_ID,
         };
         status = zephyr_port_init(&port_cfg, &can);
         if (status != UDS_STATUS_OK) {
@@ -455,13 +463,23 @@ int main(void)
     }
 #endif
 
+#if defined(DIAG_CAN_FD)
+    /* -DDIAG_CAN_FD=ON (the Pi 5 CAN FD bench): EDS's ISO-TP is built with
+     * ISOTP_ENABLE_CAN_FD, but the committed generated init leaves use_fd false
+     * (it predates can.fd: true). With it set, EDS v1.27.0 sends every frame
+     * (SF, FF, CF, FC) as an FD frame; BRS stays off (tp->brs, EDS#557). */
+    tp->use_fd = true;
+    LOG_INF("CAN FD: FDCAN1 FD mode, ISO-TP use_fd (every TX frame FD, no BRS)");
+#endif
+
     (void)uds_periodic_init();
     (void)uds_session_register_change_cb(srv->cfg.session_ctx,
                                           s_on_session_change);
 
-    LOG_INF("UDS stack ready: %u DIDs  %u DTCs  RX=0x%03X TX=0x%03X",
+    LOG_INF("UDS stack ready: %u DIDs  %u DTCs  RX=0x%03X TX=0x%03X PHYS=0x%03X",
             (unsigned)GEN_DID_COUNT, (unsigned)GEN_DTC_COUNT,
-            (unsigned)DIAG_RX_CAN_ID, (unsigned)DIAG_TX_CAN_ID);
+            (unsigned)DIAG_RX_CAN_ID, (unsigned)DIAG_TX_CAN_ID,
+            (unsigned)DIAG_PHYS_RX_CAN_ID);
 
 #if defined(DIAG_SECURE_BOOT_BUILD)
     /*

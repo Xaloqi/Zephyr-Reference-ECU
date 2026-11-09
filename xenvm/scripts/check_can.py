@@ -9,6 +9,17 @@ Exit status 0 only on PASS.
 The last boot in the log is the canary: its CAN backend is on another vcan, so
 every request must go unanswered. The boots before it must answer everything,
 and their SecurityAccess seed nonces must all differ.
+CAN FD runs (XENVM_CAN_FD=1; the tester logs "fd tx_dl 64") judge the virtio-can
+transport on the wire, per boot: the driver negotiated FD; EDS logged CAN FD
+mode; DomZ's FD frames longer than 8 bytes are on DomD's vcan0 (out of DomZ);
+and DomZ reacted to both FD-only requests, a 9-byte FD Single Frame (its
+response's first frame follows it) and a 64-byte FD First Frame (its Flow
+Control follows it), so FD frames went into DomZ.
+At the ISO-TP level EDS v1.27.0 (EDS#557) sends every frame of its FD channel as an
+FD frame (SF, FF, CF and FC), so a Linux CAN_ISOTP socket with CANFD_MTU, which
+drops every frame that is not CANFD_MTU (net/can/isotp.c: 'if (skb->len !=
+so->ll.mtu) return;'), gets every answer. Every request must be answered; an
+unanswered one fails the boot.
 """
 import re
 import sys
@@ -50,6 +61,26 @@ def wire(lines, can_id):
     return [l for l in lines if re.match(r"WIRE vcan0 %s \[" % can_id, l)]
 
 
+def ids(n, lines, errors):
+    """The (request, response) IDs this boot's tester used, from its 'ISOTP' line,
+    and the IDs EDS in DomZ says it uses ('UDS stack ready: ... TX= PHYS='). The two
+    must agree, or a tester and an image left on other IDs could pass vacuously."""
+    t = [m.groups() for m in (re.match(r"ISOTP vcan0 tx 0x([0-9A-F]{3}) rx 0x([0-9A-F]{3})", l)
+                              for l in lines) if m]
+    if not t:
+        errors.append("boot %d: no 'ISOTP' line from the tester" % n)
+        return "7E0", "7E8"
+    req, rsp = t[0]
+    e = [m.groups() for m in (re.search(r"UDS stack ready: .* TX=0x([0-9A-F]{3}) PHYS=0x([0-9A-F]{3})", l)
+                              for l in lines) if m]
+    if e and e[0] != (rsp, req):
+        errors.append("boot %d: tester uses 0x%s/0x%s, EDS in DomZ uses 0x%s/0x%s"
+                      % (n, req, rsp, e[0][1], e[0][0]))
+    if not e:
+        errors.append("boot %d: EDS did not log its CAN IDs (UDS stack ready ... TX= PHYS=)" % n)
+    return req, rsp
+
+
 def common(n, lines, errors):
     if not any(re.match(r"/local/domain/1/backend/virtio/\d+/0/type = \"virtio,device24\"", l)
                for l in lines):
@@ -58,9 +89,54 @@ def common(n, lines, errors):
         errors.append("boot %d: EDS did not start in DomZ" % n)
 
 
+# As isotp_probe.py prints them (over 24 bytes: "<SID> <pattern> x<n>").
+FD_REQS = ("22" + " f1 90" * 4, "22 f1 90 x33")
+# Every request of the FD run must be answered: with EDS >= v1.27.0 all TX frames are FD.
+FD_ALL = ("3e 00", "10 03", "22 f1 90", "27 01") + FD_REQS
+
+
+def is_fd_run(lines):
+    return any(re.match(r"ISOTP vcan0 tx .* fd tx_dl 64", l) for l in lines)
+
+
+def judge_fd(n, lines, ex, req, rsp, errors):
+    if not any("can_virtio: virtio-can: classic +FD" in l for l in lines):
+        errors.append("boot %d: virtio-can did not negotiate CAN FD" % n)
+    if not any("CAN FD: " in l for l in lines):
+        errors.append("boot %d: EDS did not log CAN FD mode (built without DIAG_CAN_FD?)" % n)
+    if not any(re.match(r"WIRE vcan0 %s \[(1[2-9]|[2-6][0-9])\] FD" % rsp, l) for l in lines):
+        errors.append("boot %d: no CAN FD frame longer than 8 bytes from DomZ (0x%s) on vcan0" % (n, rsp))
+    w = [l for l in lines if l.startswith("WIRE vcan0 ")]
+    for pat, then, what in ((r"WIRE vcan0 %s \[12\] FDBRS 00 09 22" % req, r"WIRE vcan0 %s \[64\] FD 10 " % rsp,
+                             "the 9-byte FD Single Frame"),
+                            (r"WIRE vcan0 %s \[64\] FDBRS 10 43 22" % req, r"WIRE vcan0 %s \[3\] FD 30 " % rsp,
+                             "the 64-byte FD First Frame")):
+        i = next((k for k, l in enumerate(w) if re.match(pat, l)), None)
+        if i is None:
+            errors.append("boot %d: the tester did not send %s" % (n, what))
+        elif not (i + 1 < len(w) and re.match(then, w[i + 1])):
+            errors.append("boot %d: DomZ did not react to %s (it did not reach DomZ?)" % (n, what))
+    got = {}
+    for q, r in ex:
+        got.setdefault(q, []).append(r)
+    for q in FD_ALL:
+        rs = got.get(q)
+        if rs is None:
+            errors.append("boot %d: %s not sent" % (n, q.split()[0] + " ..."))
+        elif any(r == "TIMEOUT" for r in rs):
+            errors.append("boot %d: %s unanswered (EDS >= v1.27.0 answers on the FD channel)" % (n, q[:20]))
+
+
 def judge(n, lines, errors):
     common(n, lines, errors)
+    req, rsp = ids(n, lines, errors)
     ex = uds(lines)
+    if is_fd_run(lines):
+        judge_fd(n, lines, ex, req, rsp, errors)
+        # The rest of judge() is the classic exchange.
+        if not any("SecurityAccess seeds from entropy device" in l for l in lines):
+            errors.append("boot %d: EDS did not register the entropy seed callback" % n)
+        return [r.split()[2:] for q, r in ex if q == "27 01" and r.startswith("67 01") and len(r.split()) == 10]
     reqs = tuple(q for q, _ in ex)
     if reqs[:len(WANT)] != WANT:
         errors.append("boot %d: tester sent %s, expected %s" % (n, list(reqs), list(WANT)))
@@ -91,22 +167,23 @@ def judge(n, lines, errors):
     if not any("SecurityAccess seeds from entropy device" in l for l in lines):
         errors.append("boot %d: EDS did not register the entropy seed callback" % n)
     # Answers must have crossed the bus in DomD, not come from anywhere else.
-    if not dead and not wire(lines, "7E8"):
-        errors.append("boot %d: no 0x7E8 frame on DomD's vcan0" % n)
+    if not dead and not wire(lines, rsp):
+        errors.append("boot %d: no 0x%s frame on DomD's vcan0" % (n, rsp))
     return seeds
 
 
 def judge_canary(n, lines, errors):
     common(n, lines, errors)
+    req, rsp = ids(n, lines, errors)
     ex = uds(lines)
     if not ex:
         errors.append("canary boot %d: the tester sent nothing" % n)
     answered = [q for q, r in ex if r != "TIMEOUT"]
     if answered:
         errors.append("canary boot %d: answered %s with the backend on another bus" % (n, answered))
-    if wire(lines, "7E8"):
-        errors.append("canary boot %d: 0x7E8 frames on vcan0" % n)
-    if not wire(lines, "7E0"):
+    if wire(lines, rsp):
+        errors.append("canary boot %d: 0x%s frames on vcan0" % (n, rsp))
+    if not wire(lines, req):
         errors.append("canary boot %d: the tester's frames are not on vcan0" % n)
 
 
@@ -132,8 +209,8 @@ def main():
         print("-" * 72)
         print("DomZ boot %d%s" % (n, " (canary: CAN backend on vcan9)" if n == last else ""))
         for l in b[n]:
-            if l.startswith(("DomZ domid", "/local/domain/1/backend", "UDS ", "WIRE ", "DomZ  ")) \
-                    or "SecurityAccess seeds" in l or "Booting Zephyr" in l or "can_virtio:" in l \
+            if l.startswith(("DomZ domid", "/local/domain/1/backend", "ISOTP ", "UDS ", "WIRE ", "DomZ  ")) \
+                    or "UDS stack ready" in l or "SecurityAccess seeds" in l or "Booting Zephyr" in l or "can_virtio:" in l \
                     or "running without HW supervision" in l or "placeholder AES keys" in l \
                     or "ioreq not completed" in l:
                 print("  " + l)
@@ -156,9 +233,12 @@ def main():
     if errors:
         print("FAIL: " + "; ".join(errors))
         return 1
+    fd = any(is_fd_run(b[n]) for n in b)
     print("PASS: DomZ (EDS on Zephyr + Xaloqi/zephyr-virtio-can) answered UDS over ISO-TP on DomD's "
-          "vcan0 through virtio-can on %d boots (3E, 10 03, 22 F190, 27 01 x2), seed nonces all "
-          "differ, and the canary boot (backend on vcan9) answered nothing" % len(seeds))
+          "vcan0 through virtio-can on %d boots (%s%s), seed nonces all "
+          "differ, and the canary boot (backend on vcan9) answered nothing"
+          % (len(seeds), "3E, 10 03, 22 F190, 27 01 x2" + (", 22 x4, 22 x33" if fd else ""), "; CAN FD: virtio-can negotiated FD and carried FD frames both ways, and every ISO-TP "
+             "answer, multi-frame ones included, reached the CANFD_MTU tester" if fd else ""))
     return 0
 
 

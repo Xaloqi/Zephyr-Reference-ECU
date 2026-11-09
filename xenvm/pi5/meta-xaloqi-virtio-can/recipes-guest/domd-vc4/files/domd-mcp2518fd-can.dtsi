@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Xaloqi
+//
+// Appended to SoDeV's DomD partial DT (bcm2712-raspberrypi5-domd-vc4.dts) by
+// domd-vc4.bbappend when XAQ_CAN_HAT = "mcp2518fd": the Waveshare 2-CH CAN FD
+// HAT (two MCP2518FD, one on RP1 SPI0 and one on RP1 SPI1) as DomD's can0/can1.
+// The classic HAT (two MCP2515 on SPI0) is domd-mcp2515-can.dtsi; only one of the
+// two is ever appended.
+//
+// No Xen change is needed, as for the classic HAT. DomD owns the whole RP1
+// peripheral window through the pcie2 xen,reg aperture (host 0x1f_00000000,
+// 16 MiB): SPI0 is RP1 +0x50000, SPI1 is RP1 +0x54000, the GPIO bank +0xd0000.
+// Both SPI interrupts (RP1 IRQ 19 and 20) and the GPIO bank's are RP1-internal
+// (its irqchip, then MSI-X through the MIP, whose SPIs are DomD's). Nothing else
+// in SoDeV's DomD DT uses GPIO 8-11 or 18-25 (the uart0 pins in it are the
+// BCM2712's own, through SCMI, not RP1's).
+//
+// Values, and where they come from:
+//  - Board "Rev2.1" (MCP2518FD; older boards have the MCP2517FD, same driver),
+//    default "Dual SPI Mode" (Waveshare wiki 2-CH_CAN_FD_HAT, fetched
+//    2026-11-01): CAN_0 = SPI0 CE0 (GPIO8), INT GPIO25; CAN_1 = SPI1 CE0 (GPIO18),
+//    INT GPIO24; SPI1 MISO/MOSI/SCLK = GPIO19/20/21. The wiki's config.txt:
+//    "dtoverlay=spi1-3cs", "dtoverlay=mcp251xfd,spi0-0,interrupt=25",
+//    "dtoverlay=mcp251xfd,spi1-0,interrupt=24".
+//  - 40 MHz crystal per controller, MCP2562FD transceivers: the Rev2.1 schematic
+//    (X1/X2 "40MHz"). The kernel's mcp251xfd overlay uses the same 40 MHz.
+//  - 20 MHz SPI clock: the wiki ("as high as 20MHz") and the mcp251xfd overlay.
+//    The DesignWare SSI divides RP1_CLK_SYS (200 MHz) by 10.
+//  - SPI nodes: copied from the kernel's rp1.dtsi (snps,dw-apb-ssi, regs 0x130,
+//    RP1_INT_SPI0 = 19, RP1_INT_SPI1 = 20, RP1_CLK_SYS = clocks18000 index 0x0c).
+//    No DMA, as for the classic HAT: PIO keeps RP1's DMA engine out of the
+//    bring-up. mcp251xfd moves at most a 76-byte frame per transfer.
+//  - CS by GPIO, as the kernel's spi0/spi1 overlays do.
+
+&gpiod0000 {
+	xaq_spi0_pins: xaq_spi0_pins {
+		function = "spi0";
+		pins = "gpio9", "gpio10", "gpio11";
+		drive-strength = <12>;
+		bias-disable;
+	};
+	xaq_spi0_cs_pins: xaq_spi0_cs_pins {
+		function = "gpio";
+		pins = "gpio8";
+		bias-pull-up;
+	};
+	xaq_spi1_pins: xaq_spi1_pins {
+		function = "spi1";
+		pins = "gpio19", "gpio20", "gpio21";
+		drive-strength = <12>;
+		bias-disable;
+	};
+	xaq_spi1_cs_pins: xaq_spi1_cs_pins {
+		function = "gpio";
+		pins = "gpio18";
+		bias-pull-up;
+	};
+	xaq_canfd0_int: xaq_canfd0_int {
+		function = "gpio";
+		pins = "gpio25";
+		bias-pull-up;
+	};
+	xaq_canfd1_int: xaq_canfd1_int {
+		function = "gpio";
+		pins = "gpio24";
+		bias-pull-up;
+	};
+};
+
+// Under /passthrough: dom0less copies only that subtree into DomD's DT.
+&passthrough {
+	xaq_canfd_osc: xaq-canfd-osc {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <40000000>;
+	};
+};
+
+&rp1 {
+	xaq_rp1_spi0: spi@c040050000 {
+		compatible = "snps,dw-apb-ssi";
+		reg = <0xc0 0x40050000 0x0 0x130>;
+		interrupts = <0x13 0x4>;
+		clocks = <&clocks18000 0x0c>;
+		clock-names = "ssi_clk";
+		num-cs = <1>;
+		cs-gpios = <&gpiod0000 8 1>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&xaq_spi0_pins &xaq_spi0_cs_pins>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		xaq_canfd0: can@0 {
+			compatible = "microchip,mcp2518fd";
+			reg = <0>;
+			spi-max-frequency = <20000000>;
+			clocks = <&xaq_canfd_osc>;
+			interrupt-parent = <&gpiod0000>;
+			interrupts = <25 0x8>;	/* IRQ_TYPE_LEVEL_LOW */
+			pinctrl-names = "default";
+			pinctrl-0 = <&xaq_canfd0_int>;
+		};
+	};
+
+	xaq_rp1_spi1: spi@c040054000 {
+		compatible = "snps,dw-apb-ssi";
+		reg = <0xc0 0x40054000 0x0 0x130>;
+		interrupts = <0x14 0x4>;
+		clocks = <&clocks18000 0x0c>;
+		clock-names = "ssi_clk";
+		num-cs = <1>;
+		cs-gpios = <&gpiod0000 18 1>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&xaq_spi1_pins &xaq_spi1_cs_pins>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		xaq_canfd1: can@0 {
+			compatible = "microchip,mcp2518fd";
+			reg = <0>;
+			spi-max-frequency = <20000000>;
+			clocks = <&xaq_canfd_osc>;
+			interrupt-parent = <&gpiod0000>;
+			interrupts = <24 0x8>;	/* IRQ_TYPE_LEVEL_LOW */
+			pinctrl-names = "default";
+			pinctrl-0 = <&xaq_canfd1_int>;
+		};
+	};
+};

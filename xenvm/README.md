@@ -75,6 +75,14 @@ request was answered on both boots, the answers crossed vcan0 as `0x7E8` frames,
 nonces all differ, and the canary boot stayed silent while EDS was up and the tester's
 frames were on the bus ([`scripts/check_can.py`](scripts/check_can.py)).
 
+`XENVM_CAN_ECU_INDEX=n` builds DomZ as ECU n (0x7E0+n / 0x7E8+n). `XENVM_CAN_FD=1` builds
+it with CAN FD (`-DDIAG_CAN_FD=ON`: `CONFIG_CAN_FD_MODE` and EDS's ISO-TP with CAN FD)
+and runs DomD's buses at MTU 72 with a CAN FD tester (TX_DL 64, BRS). The check then
+judges the virtio-can transport on the wire: FD negotiated, DomZ's FD frames on vcan0,
+DomZ reacting to an FD Single Frame and an FD First Frame. At the ISO-TP level only the
+answers reach a CAN FD tester, multi-frame ones included, because EDS v1.27.0 sends every
+frame of its FD channel as an FD frame (EDS#557, EDS#541).
+
 The CAN parts are built in a second image, `xaloqi-zre-xenvm-can:1`. It is the builder
 image plus the Rust toolchain of the `rust` image pinned in [`versions.env`](versions.env),
 for DomD's backends. The DoIP image is unchanged. Measured from a fresh clone with
