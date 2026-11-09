@@ -154,8 +154,8 @@ cfg() { # DomZ-CAN's cfg: SoDeV's domz.cfg, our image, two virtio devices
   cat >> $RUN/domz-can.cfg <<CFG
 name = "$NAME"
 kernel = "$BIN"
-virtio = [ "backend=DomD, type=virtio,device24, transport=mmio, grant_usage=0${BT:+, backend_type=$BT}",
-           "backend=DomD, type=virtio,device4, transport=mmio, grant_usage=0${BT:+, backend_type=$BT}" ]
+virtio = [ "backend=1, type=virtio,device24, transport=mmio, grant_usage=0${BT:+, backend_type=$BT}",
+           "backend=1, type=virtio,device4, transport=mmio, grant_usage=0${BT:+, backend_type=$BT}" ]
 CFG
 }
 

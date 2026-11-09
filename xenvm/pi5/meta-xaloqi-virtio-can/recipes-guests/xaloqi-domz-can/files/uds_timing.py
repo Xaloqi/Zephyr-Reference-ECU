@@ -85,7 +85,7 @@ def main():
     s.bind((iface,))
     tp = bytes([0x02, 0x3E, 0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA])
     frame = struct.pack(FDFMT, req, 8, CANFD_BRS, tp) if FD else struct.pack(FMT, req, 8, tp)
-    lat, timeouts, pending, bad, dup = [], 0, 0, 0, 0
+    lat, timeouts, pending, bad, dup, late = [], 0, 0, 0, 0, 0
     if csv:
         csv.write("sample,p2_ms\n")
     print("P2 %s req 0x%03X rsp 0x%03X n=%d gap=%.0f ms%s" % (iface, req, rsp, n, gap * 1000,
@@ -101,6 +101,7 @@ def main():
         except (BlockingIOError, socket.timeout):
             pass
         s.setblocking(True)
+        t_send = time.time()          # same clock (CLOCK_REALTIME) as SO_TIMESTAMPNS
         s.send(frame)
         t_req = None
         deadline = time.monotonic() + 1.0
@@ -117,6 +118,24 @@ def main():
                 pending += 1
             elif cid == rsp and d[:3] == b"\x02\x7e\x00":
                 got = ts
+                if t_req is None:
+                    # Seen on the Pi 5 HAT (mcp251x): a fast ECU's answer is delivered
+                    # before our own echo, because the driver services RX before
+                    # TX-complete. Wait briefly for the echo; it is stamped after the
+                    # answer, so for this sample use the send time instead (a little
+                    # earlier than the frame left the controller: P2 errs high).
+                    end = time.monotonic() + 0.05
+                    while t_req is None and time.monotonic() < end:
+                        s.settimeout(max(0.001, end - time.monotonic()))
+                        try:
+                            c2, d2, ts2 = recv(s)
+                        except socket.timeout:
+                            break
+                        if c2 == req and d2[:3] == b"\x02\x3e\x00":
+                            t_req = ts2
+                    if t_req is None or t_req > got:
+                        t_req = t_send
+                        late += 1
                 break
             elif cid == rsp:
                 bad += 1
@@ -132,9 +151,9 @@ def main():
                 csv.write("%d,%.4f\n" % (i, ms))
         time.sleep(gap)
     lat.sort()
-    line = ("P2 %s 0x%03X: n=%d answered=%d timeouts=%d pending=%d bad=%d unsolicited=%d "
+    line = ("P2 %s 0x%03X: n=%d answered=%d timeouts=%d pending=%d bad=%d unsolicited=%d echo_late=%d "
             "min=%.3f median=%.3f p95=%.3f p99=%.3f max=%.3f ms"
-            % (iface, rsp, n, len(lat), timeouts, pending, bad, dup,
+            % (iface, rsp, n, len(lat), timeouts, pending, bad, dup, late,
                lat[0] if lat else float("nan"), pct(lat, 50), pct(lat, 95), pct(lat, 99),
                lat[-1] if lat else float("nan")))
     print(line, flush=True)
