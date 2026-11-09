@@ -148,6 +148,12 @@ stop_backends() {
 cfg() { # DomZ-CAN's cfg: SoDeV's domz.cfg, our image, two virtio devices
   [ -f /etc/xen/domz.cfg ] || fail "/etc/xen/domz.cfg missing (image built without -z?)"
   sed -e '/^virtio = \[\]/d' -e '/^name = /d' -e '/^kernel = /d' /etc/xen/domz.cfg > $RUN/domz-can.cfg
+  # XAQ_DOMZ_CPUS: put DomZ-CAN on other pCPUs than domz.cfg's "0" (which it shares
+  # with Dom0 and DomD's vCPU 0). On the Pi 5 without DomA, pCPUs 2-3 are idle.
+  if [ -n "${XAQ_DOMZ_CPUS:-}" ]; then
+    sed -i '/^cpus = /d' $RUN/domz-can.cfg
+    echo "cpus = \"$XAQ_DOMZ_CPUS\"" >> $RUN/domz-can.cfg
+  fi
   # backend_type=standalone: SoDeV's libxl (0014) defaults virtio backends to
   # qemu, and would try to spawn one; ours are vhost-user behind xen-vhost-frontend.
   # Upstream xl has no such key, which is why the QEMU harness's cfg lacks it.
