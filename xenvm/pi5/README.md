@@ -37,7 +37,7 @@ loopback without ever touching the bus.
 | `sodev-add.sh` | Copies the layer into a SoDeV workspace (with `../patches/` and the DomZ-CAN image) and adds it to the DomD component of `rpi5-sodev.yaml` |
 | `rehearse.sh`, `rehearse/` | Runs the bench driver end to end under QEMU, before the board exists |
 | `bench/` | Host and DomD tools for the bench sessions: `xaloqi-domd-load` (the DomD load for P2 cells C/D: start, check, stop, `cell`), `console-send.py` (a file to DomD over the Xen console as base64 with a sha256 check) |
-| `rehearse/domd-load-rehearse.sh`, `rehearse/domd-teardown.sh` | DomD scripts for the same QEMU harness: the load tool end to end with P2, and a create/destroy loop of DomZ-CAN that records xen-vhost-frontend's output and Xen's view of the domain |
+| `rehearse-b3.sh`, `rehearse/domd-load-rehearse.sh`, `rehearse/domd-teardown.sh` | DomD scripts for the same QEMU harness: the load tool end to end with P2 (`rehearse-b3.sh <build> load`), and a create/destroy loop of DomZ-CAN that records xen-vhost-frontend's output and Xen's view of the domain (`rehearse-b3.sh <build> teardown`) |
 | `scripts/gen-crates-inc.py` | Regenerates the recipes' crate lists from a (patched) `Cargo.lock` |
 
 In the SD image, DomD gets `xaloqi-can-bench`, one subcommand per bench step
