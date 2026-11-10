@@ -40,7 +40,7 @@ ncpu() { n=$(grep -c '^processor' /proc/cpuinfo); echo "${n:-1}"; }
 pids() { # pids of what this script started, found by exact argv (no substring match)
   for d in /proc/[0-9]*; do
     p=${d#/proc/}; [ "$p" = "$$" ] && continue
-    set -- $(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+    set -- $(tr '\0' ' ' 2>/dev/null < "$d/cmdline") || continue
     [ $# -gt 0 ] || continue
     last=; for a; do last=$a; done
     case "$*" in
@@ -70,7 +70,9 @@ start() {
   fi
   # Watchdog: stops the load after SECS even if nobody comes back to type `stop`.
   # The trailing WMARK argument is only there for pids().
-  sh -c 'sleep "$2"; sh "$1" stop > /dev/null 2>&1' xaloqi-domd-load "$SELF" "$secs" "$WMARK" &
+  # Short sleeps, so that killing it leaves no long-running sleep behind.
+  sh -c 'i=0; while [ "$i" -lt "$2" ]; do sleep 1; i=$((i + 1)); done; sh "$1" stop > /dev/null 2>&1' \
+    xaloqi-domd-load "$SELF" "$secs" "$WMARK" &
   sleep 1
   pass "$n busy loop(s) + candump$([ "${XAQ_LOAD_CANGEN:-0}" = 1 ] && echo " + cangen") started, auto-stop in ${secs}s"
 }
