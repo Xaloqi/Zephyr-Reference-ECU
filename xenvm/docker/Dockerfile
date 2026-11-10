@@ -14,14 +14,20 @@ RUN dpkg --add-architecture arm64 && apt-get update && apt-get install -y --no-i
     libaio-dev:arm64 libnl-3-dev:arm64 libnl-route-3-dev:arm64 \
     && rm -rf /var/lib/apt/lists/*
 
+# The weekly run of 2026-11-08 died here on a transient download failure (wget
+# exit 4, ZRE#49) while the other job pulled the same files fine. Retries are
+# safe: every archive below is sha256-checked after the download. -nv keeps
+# the retry lines in the log instead of -q's silence.
+ENV WGET_OPTS="-nv --tries=5 --waitretry=15 --retry-connrefused --retry-on-http-error=429,500,502,503,504 --timeout=60"
+
 # Zephyr SDK: minimal bundle + the aarch64-zephyr-elf toolchain, checksums pinned.
 ARG ZSDK_VER
 ARG ZSDK_BASE_URL
 ARG ZSDK_MINIMAL_SHA256
 ARG ZSDK_AARCH64_SHA256
 RUN cd /opt && \
-    wget -q ${ZSDK_BASE_URL}/zephyr-sdk-${ZSDK_VER}_linux-x86_64_minimal.tar.xz && \
-    wget -q ${ZSDK_BASE_URL}/toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz && \
+    wget ${WGET_OPTS} ${ZSDK_BASE_URL}/zephyr-sdk-${ZSDK_VER}_linux-x86_64_minimal.tar.xz && \
+    wget ${WGET_OPTS} ${ZSDK_BASE_URL}/toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz && \
     echo "${ZSDK_MINIMAL_SHA256}  zephyr-sdk-${ZSDK_VER}_linux-x86_64_minimal.tar.xz" | sha256sum -c && \
     echo "${ZSDK_AARCH64_SHA256}  toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz" | sha256sum -c && \
     tar xf zephyr-sdk-${ZSDK_VER}_linux-x86_64_minimal.tar.xz && \
@@ -33,6 +39,6 @@ ENV ZEPHYR_SDK_INSTALL_DIR=/opt/zephyr-sdk-${ZSDK_VER}
 # west + Zephyr's base Python requirements, taken from the pinned Zephyr SHA.
 ARG ZEPHYR_REV
 RUN python3 -m venv /opt/venv && \
-    wget -q -O /tmp/req.txt https://raw.githubusercontent.com/zephyrproject-rtos/zephyr/${ZEPHYR_REV}/scripts/requirements-base.txt && \
+    wget ${WGET_OPTS} -O /tmp/req.txt https://raw.githubusercontent.com/zephyrproject-rtos/zephyr/${ZEPHYR_REV}/scripts/requirements-base.txt && \
     /opt/venv/bin/pip install -q --no-cache-dir west -r /tmp/req.txt && rm /tmp/req.txt
 ENV PATH=/opt/venv/bin:${PATH}
