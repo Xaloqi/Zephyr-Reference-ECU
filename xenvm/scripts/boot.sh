@@ -48,7 +48,7 @@ K0=0x49000000; R0=0x50000000; KD=0x80000000; RD=0x88000000
 fdtput $D -p -t s /pl061@9030000 status disabled
 fdtput $D -t s /chosen xen,xen-bootargs \
   "console=dtuart dtuart=/pl011@9000000 dom0_mem=512M dom0_max_vcpus=1 xsm=dummy bootscrub=0 loglvl=all guest_loglvl=all"
-fdtput $D -t s /chosen xen,dom0-bootargs "console=hvc0 earlycon=xen rdinit=/init"
+fdtput $D -t s /chosen xen,dom0-bootargs "console=hvc0 earlycon=xen rdinit=/init${XENVM_DOMD_WAIT:+ xaloqi.wait=$XENVM_DOMD_WAIT}"
 fdtput $D -t i /chosen '#address-cells' 2
 fdtput $D -t i /chosen '#size-cells' 2
 fdtput $D -c /chosen/module@$K0

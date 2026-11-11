@@ -1,0 +1,31 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Xaloqi
+# CPU time of a running process over a window, from /proc (POSIX sh, busybox is enough):
+#   xaloqi-proc-cpu NAME [SECS] [MAX_PERCENT]
+# NAME is matched against the basename of argv[0]; SECS defaults to 60. Prints the CPU seconds
+# used and the percentage of one vCPU, and PASS when it is at most MAX_PERCENT (default 5), else
+# FAIL. B3 measured vhost-device-can's busy-poll with this method, in DomD with DomZ-CAN up and
+# the bus idle: 79 s of CPU in 80 s before rust-vmm/vhost-device#1020, under 0.1 s after.
+set -u
+NAME=${1:?process name, e.g. vhost-device-can}; SECS=${2:-60}; MAX=${3:-5}
+pid=
+for p in /proc/[0-9]*; do
+  a=$(tr '\0' '\n' < $p/cmdline 2>/dev/null | head -n 1)
+  [ "${a##*/}" = "$NAME" ] && { pid=${p#/proc/}; break; }
+done
+[ -n "$pid" ] || { echo "FAIL: no process named $NAME"; exit 1; }
+ticks() { # utime+stime of $pid in clock ticks (fields 14 and 15 after the "(comm)" field)
+  set -- $(sed 's/.*) //' /proc/$pid/stat 2>/dev/null) || return 1
+  [ -n "${12:-}" ] || return 1
+  echo $(( ${12} + ${13} ))
+}
+HZ=$(getconf CLK_TCK 2>/dev/null || echo 100)
+t0=$(ticks) || { echo "FAIL: $NAME (pid $pid) went away"; exit 1; }
+sleep "$SECS"
+t1=$(ticks) || { echo "FAIL: $NAME (pid $pid) went away during the window"; exit 1; }
+d=$(( t1 - t0 ))
+# hundredths of a second and of a percent, integer arithmetic only
+cs=$(( d * 100 / HZ )); pm=$(( d * 10000 / (HZ * SECS) ))
+echo "$NAME pid $pid: $((cs / 100)).$(printf %02d $((cs % 100))) s of CPU in $SECS s wall = $((pm / 100)).$(printf %02d $((pm % 100))) % of one vCPU"
+if [ $((pm)) -le $((MAX * 100)) ]; then echo "PASS: at most $MAX %"; else echo "FAIL: more than $MAX %"; exit 1; fi

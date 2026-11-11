@@ -57,14 +57,24 @@ cp_v() { # <src> <dst dir>: copy and show the checksum, so the log says what wen
   echo "  $(sha256sum "$1" | cut -c1-16)  $(basename "$1") -> ${2#$WS/}"
 }
 echo "patches (verbatim from xenvm/patches/):"
-cp_v "$XENVM/patches/vhost-device-c0bfee92.patch" "$L/recipes-virt/vhost-device/files"
-for p in xen-vhost-frontend-a1e333c5 vireshk-vhost-abf24853 xen-sys-8a234c94; do
+for p in vhost-device-c0bfee92 vhost-device-c0bfee92-reader-poll; do
+  cp_v "$XENVM/patches/$p.patch" "$L/recipes-virt/vhost-device/files"
+done
+for p in xen-vhost-frontend-a1e333c5 xen-vhost-frontend-a1e333c5-teardown vireshk-vhost-abf24853 vireshk-vhost-abf24853-reset xen-sys-8a234c94; do
   cp_v "$XENVM/patches/$p.patch" "$L/recipes-virt/xen-vhost-frontend/files"
 done
 F=$L/recipes-guests/xaloqi-domz-can/files
 echo "harness and DomZ image:"
 for h in isotp_probe.py can_dump.py xs-sock-relay.py; do cp_v "$XENVM/harness/$h" "$F"; done
 cp_v "$BIN" "$F"; cp_v "$STAMP" "$F"
+# The bench tools are baked in, so nothing is sent to DomD and patched live on the Pi (B3: the
+# classic card carried a stale tool).
+for h in xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu; do cp_v "$HERE/bench/$h" "$F"; done
+# Which sources this image was built from: `cat /usr/share/xaloqi-can/zre.rev` in DomD.
+ZREDIR=$(cd "$XENVM/.." && pwd)
+printf 'commit=%s dirty=%s ecu=1%s hat=%s\n' "$(git -C "$ZREDIR" rev-parse HEAD)" \
+  "$(git -C "$ZREDIR" status --porcelain | wc -l)" "$FDTAG" "$HAT" > "$F/zre.rev"
+echo "  ZRE: $(cat "$F/zre.rev")"
 echo "  DomZ: $(cat "$STAMP")"
 
 python3 - "$WS/rpi5-sodev.yaml" <<'EOF'

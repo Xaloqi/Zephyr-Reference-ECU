@@ -75,7 +75,7 @@ if [ $VARIANT = can ]; then
     echo "FAIL: CAN DomZ image was built from [$HAVE], pins and sources are [$WANT]; run xenvm/run.sh can (not boot) to rebuild"
     exit 1
   fi
-  PATCHES="vhost-device-c0bfee92.patch vireshk-vhost-abf24853.patch xen-sys-8a234c94.patch xen-vhost-frontend-a1e333c5.patch"
+  PATCHES="vhost-device-c0bfee92.patch vhost-device-c0bfee92-reader-poll.patch vireshk-vhost-abf24853.patch vireshk-vhost-abf24853-reset.patch xen-sys-8a234c94.patch xen-vhost-frontend-a1e333c5.patch xen-vhost-frontend-a1e333c5-teardown.patch"
   BWANT="backends=$(cd "$HERE" && { grep -E '^(RUST_IMAGE|RUST_TOOLCHAIN|VHOST_DEVICE_|XVF_|VHOST_FORK_|XEN_SYS_)' versions.env
                                      for p in $PATCHES; do cat patches/$p; done; } | sha256sum | cut -c1-16)"
   BHAVE=$(cat "$BUILD/out/can/backends.stamp" 2>/dev/null || echo "none (no backends built)")

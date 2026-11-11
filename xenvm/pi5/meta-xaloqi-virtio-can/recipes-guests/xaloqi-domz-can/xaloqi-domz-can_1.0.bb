@@ -3,7 +3,7 @@
 SUMMARY = "DomZ-CAN for the Pi 5 bench: ReferenceBCM (EDS) on virtio-can, and its DomD tooling"
 DESCRIPTION = "Installs into DomD: the DomZ-CAN Zephyr image (Zephyr-Reference-ECU's \
 CAN build for xenvm, ISO 15765-4 ECU 1, built by xenvm/run.sh can and staged by \
-sodev-add.sh), the bench driver xaloqi-can-bench, the stdlib testers (ISO-TP probe, \
+sodev-add.sh), the bench driver xaloqi-can-bench with its load and CPU tools, the stdlib testers (ISO-TP probe, \
 wire dump, P2 timing) and the xenstore socket relay xen-vhost-frontend needs in a \
 driver domain."
 LICENSE = "Apache-2.0"
@@ -11,11 +11,17 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 # zephyr-domz-can.bin and zephyr-domz-can.stamp are not in git: sodev-add.sh copies
 # them from the xenvm build (out/), and the stamp records the pins it was built from.
-# isotp_probe.py, can_dump.py and xs-sock-relay.py are copied from xenvm/harness/.
+# isotp_probe.py, can_dump.py and xs-sock-relay.py are copied from xenvm/harness/, the
+# xaloqi-domd-load / xaloqi-b3-group / xaloqi-proc-cpu tools from xenvm/pi5/bench/, and zre.rev
+# (the commit the image was built from) is written by sodev-add.sh.
 SRC_URI = " \
     file://zephyr-domz-can.bin \
     file://zephyr-domz-can.stamp \
     file://xaloqi-can-bench \
+    file://xaloqi-domd-load \
+    file://xaloqi-b3-group \
+    file://xaloqi-proc-cpu \
+    file://zre.rev \
     file://uds_timing.py \
     file://isotp_burst.py \
     file://isotp_probe.py \
@@ -36,12 +42,16 @@ do_install() {
     install -m 0644 ${S}/zephyr-domz-can.bin ${D}/usr/lib/xen/boot/zephyr-domz-can.bin
     install -m 0644 ${S}/zephyr-domz-can.stamp ${D}${datadir}/xaloqi-can/zephyr-domz-can.stamp
     install -m 0755 ${S}/xaloqi-can-bench ${D}${bindir}/xaloqi-can-bench
+    for f in xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu; do
+        install -m 0755 ${S}/$f ${D}${bindir}/$f
+    done
+    install -m 0644 ${S}/zre.rev ${D}${datadir}/xaloqi-can/zre.rev
     for f in uds_timing.py isotp_burst.py isotp_probe.py can_dump.py xs-sock-relay.py; do
         install -m 0755 ${S}/$f ${D}${libexecdir}/xaloqi-can/$f
     done
 }
 
-FILES:${PN} = "/usr/lib/xen/boot/zephyr-domz-can.bin ${libexecdir}/xaloqi-can ${bindir}/xaloqi-can-bench ${datadir}/xaloqi-can"
+FILES:${PN} = "/usr/lib/xen/boot/zephyr-domz-can.bin ${libexecdir}/xaloqi-can ${bindir}/xaloqi-can-bench ${bindir}/xaloqi-domd-load ${bindir}/xaloqi-b3-group ${bindir}/xaloqi-proc-cpu ${datadir}/xaloqi-can"
 # The Zephyr image is a bare-metal arm64 binary for Xen, not a Linux ELF.
 INSANE_SKIP:${PN} += "arch already-stripped"
 

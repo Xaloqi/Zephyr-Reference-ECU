@@ -8,7 +8,7 @@
 # --- DomD backends: rust-vmm vhost-device + Linaro xen-vhost-frontend --------
 # The stamp covers the pins and the patches, so editing or removing a patch
 # rebuilds the backends (and a missing patch fails here).
-PATCHES="vhost-device-c0bfee92.patch vireshk-vhost-abf24853.patch xen-sys-8a234c94.patch xen-vhost-frontend-a1e333c5.patch"
+PATCHES="vhost-device-c0bfee92.patch vhost-device-c0bfee92-reader-poll.patch vireshk-vhost-abf24853.patch vireshk-vhost-abf24853-reset.patch xen-sys-8a234c94.patch xen-vhost-frontend-a1e333c5.patch xen-vhost-frontend-a1e333c5-teardown.patch"
 backends_hash() {
   (cd /src/xenvm && { grep -E '^(RUST_IMAGE|RUST_TOOLCHAIN|VHOST_DEVICE_|XVF_|VHOST_FORK_|XEN_SYS_)' versions.env
                       for p in $PATCHES; do cat patches/$p; done; } | sha256sum | cut -c1-16)
@@ -21,20 +21,20 @@ if [ -f $BSTAMP ] && [ "$(cat $BSTAMP)" != "$BWANT" ]; then
 fi
 if [ ! -f $BSTAMP ]; then
   mkdir -p $CS $CO
-  clone() { # <dir> <url> <rev> [patch]: a fresh clone at <rev>, with the patch applied
-    log "fetch $1 $3${4:+ + patches/$4}"
+  clone() { # <dir> <url> <rev> [patches]: a fresh clone at <rev>, with the patches applied in order
+    log "fetch $1 $3${4:+ + patches/ $4}"
     rm -rf $CS/$1
     git init -q $CS/$1 && git -C $CS/$1 fetch -q --depth 1 $2 $3 && git -C $CS/$1 checkout -q FETCH_HEAD
     [ "$(git -C $CS/$1 rev-parse HEAD)" = "$3" ] || { echo "$1 is not at $3" >&2; exit 1; }
-    if [ -n "${4:-}" ]; then
-      [ -f /src/xenvm/patches/$4 ] || { echo "missing patch xenvm/patches/$4" >&2; exit 1; }
-      git -C $CS/$1 apply /src/xenvm/patches/$4 || { echo "patch $4 does not apply to $1" >&2; exit 1; }
-    fi
+    for p in ${4:-}; do
+      [ -f /src/xenvm/patches/$p ] || { echo "missing patch xenvm/patches/$p" >&2; exit 1; }
+      git -C $CS/$1 apply /src/xenvm/patches/$p || { echo "patch $p does not apply to $1" >&2; exit 1; }
+    done
   }
-  clone vhost-device $VHOST_DEVICE_URL $VHOST_DEVICE_REV vhost-device-c0bfee92.patch
-  clone vireshk-vhost $VHOST_FORK_URL $VHOST_FORK_REV vireshk-vhost-abf24853.patch
+  clone vhost-device $VHOST_DEVICE_URL $VHOST_DEVICE_REV "vhost-device-c0bfee92.patch vhost-device-c0bfee92-reader-poll.patch"
+  clone vireshk-vhost $VHOST_FORK_URL $VHOST_FORK_REV "vireshk-vhost-abf24853.patch vireshk-vhost-abf24853-reset.patch"
   clone xen-sys $XEN_SYS_URL $XEN_SYS_REV xen-sys-8a234c94.patch
-  clone xen-vhost-frontend $XVF_URL $XVF_REV xen-vhost-frontend-a1e333c5.patch
+  clone xen-vhost-frontend $XVF_URL $XVF_REV "xen-vhost-frontend-a1e333c5.patch xen-vhost-frontend-a1e333c5-teardown.patch"
   log "build DomD backends ($(rustc --version | cut -d' ' -f1-2), aarch64)"
   export CARGO_HOME=$B/cargo CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
   T=aarch64-unknown-linux-gnu

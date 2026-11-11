@@ -1,0 +1,45 @@
+vireshk/vhost abf24853: Generic::reset() and VirtioCommon::reset() return the interrupt
+without unwrapping it. Applied after vireshk-vhost-abf24853.patch.
+
+`interrupt_cb` is set only in activate(), when the guest has written DRIVER_OK. reset()
+returned `Some(self.interrupt_cb.take().unwrap())`, which panics for a device that was
+never activated (a guest created with `xl create -p` and destroyed before it ran, or one
+that died before probing the device). In xen-vhost-frontend that panic happens inside
+XenDevice::exit() with the FrontendGuests lock held, so the lock is poisoned and the
+ioreq server and foreign mappings of the guest are never released: the domain stays
+`(null) --p--d`. The field is already an Option, so `take()` is the return value.
+
+Upstream: not opened (draft in xaloqi-knowledge campaigns/2026-11-10-xvf-teardown-issue-draft.md,
+issue A); target vireshk/vhost, branch frontend/stable.
+
+diff --git a/crates/vhost-user-frontend/src/device.rs b/crates/vhost-user-frontend/src/device.rs
+index 349ad0f..e6b5ea6 100644
+--- a/crates/vhost-user-frontend/src/device.rs
++++ b/crates/vhost-user-frontend/src/device.rs
+@@ -288,8 +288,8 @@ impl VirtioCommon {
+             }
+         }
+ 
+-        // Return the interrupt
+-        Some(self.interrupt_cb.take().unwrap())
++        // Return the interrupt, which is None for a device that was never activated
++        self.interrupt_cb.take()
+     }
+ 
+     pub fn dup_eventfds(&self) -> (EventFd, EventFd) {
+diff --git a/crates/vhost-user-frontend/src/generic.rs b/crates/vhost-user-frontend/src/generic.rs
+index 271f062..f176337 100644
+--- a/crates/vhost-user-frontend/src/generic.rs
++++ b/crates/vhost-user-frontend/src/generic.rs
+@@ -281,8 +281,9 @@ impl VirtioDevice for Generic {
+             let _ = kill_evt.write(1);
+         }
+ 
+-        // Return the interrupt
+-        Some(self.common.interrupt_cb.take().unwrap())
++        // Return the interrupt, which is None for a device that was never activated
++        // (the guest never wrote DRIVER_OK)
++        self.common.interrupt_cb.take()
+     }
+ 
+     fn shutdown(&mut self) {
