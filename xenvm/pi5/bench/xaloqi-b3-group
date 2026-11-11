@@ -1,0 +1,32 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Xaloqi
+# One group of loaded P2 cells for the Pi 5 bench (B3), run from a fresh DomD boot:
+#   xaloqi-b3-group PIN [RUNS]     RUNS (3) x `xaloqi-domd-load cell PIN`, a fresh DomZ-CAN each
+# Run it detached and read the log afterwards; typing on the console while the load runs drops input:
+#   nohup sh xaloqi-b3-group 3 > /root/group-3.log 2>&1 &
+# XAQ_LOAD_SKIP_C=1 leaves out cell C (no NUCLEO on the bus).
+#
+# Why a script, and why from a fresh boot (B3 findings, 2026-11-11):
+#   - every create/destroy cycle leaves a dying domain; with two of them pinned to pCPU 0 the next
+#     DomZ-CAN cannot be created, so a group of 3 on pCPU 0 needs a boot of its own
+#   - xs-sock-relay leaks an fd per client (ZRE#63): raise the limit and drop a stale socket
+#   - an image whose bench tool still says backend=DomD needs domain 1 renamed
+set -u
+PIN=${1:?pCPU for DomZ-CAN}; RUNS=${2:-3}
+ulimit -n 65536
+rm -f /var/run/xenstored/socket
+xl list 2>/dev/null | grep -q '^DomD ' || xl rename 1 DomD
+B=$(command -v xaloqi-can-bench) || { echo "FAIL: xaloqi-can-bench not found"; exit 1; }
+L=${XAQ_LOAD_TOOL:-$(dirname "$0")/xaloqi-domd-load}
+echo "== up $(date +%T)"; sh "$B" up 2>&1 | tail -n 1
+xl list
+run=1
+while [ "$run" -le "$RUNS" ]; do
+  echo "##### pcpu=$PIN run=$run $(date +%T)"
+  sh "$L" cell "$PIN" 2>&1 | grep -av 'vGICD\|ICACTIVER'
+  echo "-- xl list"; xl list
+  echo "-- xvf.log panics"; grep -a -A1 panicked /run/xaloqi-can/xvf.log | grep -av '^--' | head -n 8
+  run=$((run + 1))
+done
+echo GROUP-FINISHED

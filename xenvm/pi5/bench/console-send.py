@@ -17,7 +17,7 @@ Prints the sha256 of FILE first: compare it with the one in the record.
 import argparse, base64, hashlib, os, sys, termios, time
 
 CHUNK = 96          # base64 characters per line: short lines survive a UART
-LINE_GAP_S = 0.05   # pause between data lines (115200 baud)
+LINE_GAP_S = float(os.environ.get("XAQ_SEND_GAP", "0.05"))  # pause between data lines (115200 baud)
 CMD_GAP_S = 1.0     # pause before each shell command: busybox ash's line editor asks the
                     # terminal for the cursor position (ESC[6n) and waits, nobody answers
 

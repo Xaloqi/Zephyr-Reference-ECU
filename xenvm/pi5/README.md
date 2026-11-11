@@ -36,7 +36,7 @@ loopback without ever touching the bus.
 | `meta-xaloqi-virtio-can/` | Yocto layer for SoDeV's DomD build (wrynose): recipes for vhost-device (can, rng) and xen-vhost-frontend, the CAN HAT in DomD's partial device tree, the kernel options, and the DomZ-CAN package |
 | `sodev-add.sh` | Copies the layer into a SoDeV workspace (with `../patches/` and the DomZ-CAN image) and adds it to the DomD component of `rpi5-sodev.yaml` |
 | `rehearse.sh`, `rehearse/` | Runs the bench driver end to end under QEMU, before the board exists |
-| `bench/` | Host and DomD tools for the bench sessions: `xaloqi-domd-load` (the DomD load for P2 cells C/D: start, check, stop, `cell`), `console-send.py` (a file to DomD over the Xen console as base64 with a sha256 check) |
+| `bench/` | Host and DomD tools for the bench sessions: `xaloqi-domd-load` (the DomD load for P2 cells C/D: start, check, stop, `cell`), `xaloqi-b3-group` (a group of loaded cells from a fresh boot), `console-send.py` (a file to DomD over the Xen console as base64 with a sha256 check) |
 | `rehearse-b3.sh`, `rehearse/domd-load-rehearse.sh`, `rehearse/domd-teardown.sh` | DomD scripts for the same QEMU harness: the load tool end to end with P2 (`rehearse-b3.sh <build> load`), and a create/destroy loop of DomZ-CAN that records xen-vhost-frontend's output and Xen's view of the domain (`rehearse-b3.sh <build> teardown`) |
 | `scripts/gen-crates-inc.py` | Regenerates the recipes' crate lists from a (patched) `Cargo.lock` |
 
@@ -128,6 +128,28 @@ echo, which overstates P2, so part of them may be the tool's. On both classic an
 DomZ-CAN runs matters more than the virtio-can path: on pCPU 0 it shares a core with Dom0
 and DomD's vCPU 0, and its tail is about three times longer than on a core of its own.
 
+### Results, DomD under load (2026-11-11)
+
+Two busy loops (one per DomD vCPU) and `candump -L can0 can1` (`bench/xaloqi-domd-load`), P2 as above,
+a fresh DomZ-CAN per run, **with vhost-device-can's busy-poll present** (unpatched images). Values in ms.
+
+| Cell | Runs | Median | p95 | p99 | Max |
+|---|---|---|---|---|---|
+| NUCLEO, DomD idle (classic) | 1 | 0.388 | 0.403 | 0.412 | 1.091 |
+| NUCLEO, DomD loaded (classic) | 5 | 0.32 to 0.39 | 0.81 to 1.09 | 1.15 to 1.22 | 1.24 to 1.31 |
+| DomZ-CAN pCPU 0, DomD loaded (classic) | 2 | 18.6 / 18.7 | 29.5 / 30.8 | 49.4 / 45.4 | 59.7 / 57.3 |
+| DomZ-CAN pCPU 3, DomD loaded (classic) | 3 | 19.2 / 19.4 / 18.3 | 29.5 / 37.1 / 31.6 | 49.1 / 49.2 / 47.4 | 49.8 / 61.5 / 67.4 |
+| DomZ-CAN pCPU 3, DomD idle (FD) | 1 | 1.515 | 1.941 | 4.121 | 7.924 |
+| DomZ-CAN pCPU 3, DomD loaded (FD) | 3 | 3.5 / 3.3 / 3.5 | 11.5 / 11.3 / 11.5 | 15.5 / 12.8 / 14.9 | 19.5 / 17.3 / 16.9 |
+| DomZ-CAN pCPU 0, DomD loaded (FD) | 2 | 19.5 / 19.5 | 30.7 / 29.6 | 49.5 / 49.0 | 60.0 / 63.5 |
+
+A loaded DomD leaves the NUCLEO alone and moves DomZ-CAN from about 1 ms to about 19 ms (50 to 67 ms max), and
+pinning it to its own core does not help on the classic image: the cost is on DomD's side of the virtio-can
+path. FD on pCPU 3 is the exception (3.5 ms); not explained (the classic runs measured cell C, about 40 s of
+load, before cell D). The classic image's bench tool predates the 11-09 fixes, so its 2 to 3 NUCLEO timeouts
+are probably the old tool. Full record and the EDS#562 download numbers:
+`xaloqi-knowledge/campaigns/2026-11-11-b3-bench-results.md`.
+
 ### Pinning DomZ-CAN
 
 `XAQ_DOMZ_CPUS` replaces the `cpus =` line of SoDeV's `domz.cfg` in the config
@@ -155,9 +177,13 @@ else uses.
 
 ### Known issues
 
-- A destroyed DomZ-CAN domain stays "dying" (one per create/destroy cycle). At teardown
-  xen-vhost-frontend's threads panic (`src/main.rs:85:56`), the likeliest reason foreign
-  mappings are not released. Not investigated.
+- A destroyed DomZ-CAN domain stays "dying" (one per create/destroy cycle from a boot's second create).
+  Killing the stale `xl create -p` or `xen-vhost-frontend` does not free it (it does under QEMU).
+  xen-vhost-frontend's threads panic at every create (`src/main.rs:85:56`, `XBInvalidState`) and the
+  guest still works; with two dying domains pinned to pCPU 0 the next create fails (`PoisonError` in
+  the frontend). So run one group of loaded cells per boot (`bench/xaloqi-b3-group`).
+- `xs-sock-relay.py` leaks a xenbus fd per client and dies at 1,024 fds, after which every `xl create`
+  fails ([#63](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/63)).
 - DomD's `flat L2 bridge activation` unit fails at boot (SoDeV's networking). It does not
   affect CAN.
 - vhost-device-can's reader busy-polls a DomD vCPU while a backend runs
@@ -167,8 +193,8 @@ else uses.
 
 ### Not measured
 
-DomD under load, an Android domain, the NUCLEO on CAN FD (its SN65HVD230 is a classic
-transceiver), and the polling path. P2 under burst load (`p2load`) needs the NUCLEO on FD.
+An Android domain, the NUCLEO on CAN FD (its SN65HVD230 is a classic
+transceiver), and the polling path. DomD under load is measured above, only with the busy-poll present. P2 under burst load (`p2load`) needs the NUCLEO on FD.
 
 ## Rehearse it without the board
 

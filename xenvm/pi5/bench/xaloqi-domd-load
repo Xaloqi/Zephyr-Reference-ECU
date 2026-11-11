@@ -9,6 +9,7 @@
 #   xaloqi-domd-load start [SECS]   one busy loop per DomD vCPU + candump on can0 and can1
 #                                   (every frame, formatted, to /dev/null). Stops by
 #                                   itself after SECS (900) in case the console is lost.
+#   (do not pipe `start` into tail/grep: the loops inherit the pipe and hold it open)
 #   xaloqi-domd-load check          per-vCPU busy % over 2 s, from /proc/stat: PASS when
 #                                   every vCPU is at least 90 % busy
 #   xaloqi-domd-load status         what is running
@@ -21,6 +22,8 @@
 # The busy loops run at normal priority, so the tester (uds_timing.py), the vhost
 # backends and xen-vhost-frontend compete with them as they would on a loaded DomD.
 # Cells C/D: start, check, then `xaloqi-can-bench p2 ...`, then stop.
+#
+# XAQ_LOAD_SKIP_C=1 leaves out cell C (no NUCLEO on the bus: the CAN FD HAT-only setup).
 #
 # XAQ_LOAD_CANGEN=1 also starts cangen on can0 (ID 6F0, 8 bytes, 1 ms gap, about 25 %
 # of a 500 kbit/s bus) so candump has frames to read. Off by default: without it candump
@@ -124,12 +127,12 @@ stop() {
 
 cell() {
   pin=${1:?pCPU for DomZ-CAN (0 = SoDeV default, 3 = its own core)}; n=${2:-1000}
-  B=/usr/local/bin/xaloqi-can-bench
+  B=$(command -v xaloqi-can-bench) || { echo "FAIL: xaloqi-can-bench not found"; exit 1; }
   echo "=== cell C/D, DomZ-CAN on pCPU $pin, $n samples"
   XAQ_DOMZ_CPUS=$pin sh $B domz | tail -1
   sh "$SELF" start 900 || exit 1
   sh "$SELF" check || { sh "$SELF" stop; exit 1; }
-  echo "--- C: NUCLEO (ECU 0), DomD loaded"; sh $B p2 0 "$n" | tail -2
+  [ "${XAQ_LOAD_SKIP_C:-0}" = 1 ] || { echo "--- C: NUCLEO (ECU 0), DomD loaded"; sh $B p2 0 "$n" | tail -2; }
   echo "--- D: DomZ-CAN (ECU 1) on pCPU $pin, DomD loaded"; sh $B p2 1 "$n" | tail -2
   sh "$SELF" check | grep -E "^(load|soc)"
   sh "$SELF" stop
