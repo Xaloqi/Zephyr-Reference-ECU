@@ -1,0 +1,37 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Xaloqi
+# B4 cell 7: N create/destroy cycles of DomZ-CAN, and what each one leaves behind (POSIX sh, busybox is enough):
+#   xaloqi-teardown-loop [N]        N (10) cycles; DomZ-CAN on pCPU $XAQ_DOMZ_CPUS (3)
+# Each cycle: `xaloqi-can-bench domz` (fresh backends and frontend, a DomZ-CAN that answers), then
+# `xl destroy` (90 s limit), then a 3 s pause. After each destroy it prints one RESULT line: how long
+# the destroy took, dying domains it left (`(null) --p--d` in xl list), and the frontend's panics by
+# kind (XBInvalidState from main.rs:85, issue B; a panic in the vhost-user-frontend crate, i.e. reset(), issue A; PoisonError). The frontend's log
+# of every cycle is kept in /root/teardown/xvf-<n>.log, for the upstream issue. Stops at the first
+# FAIL of `domz` (a DomZ-CAN that does not answer). Ends with one SUMMARY line.
+# B3 (before the reset() fix): one dying domain per create from the second cycle on, main.rs:85:56 in every one.
+set -u
+N=${1:-10}; PIN=${XAQ_DOMZ_CPUS:-3}
+B=$(command -v xaloqi-can-bench) || { echo "FAIL: xaloqi-can-bench not found"; exit 1; }
+R=/run/xaloqi-can; K=/root/teardown; mkdir -p $K
+dying() { xl list | grep -c '(null)'; }
+cnt() { grep -c "$1" "$2" 2>/dev/null; }
+d_start=$(dying); echo "== teardown loop: $N cycles, DomZ-CAN on pCPU $PIN, $d_start dying domain(s) before"
+c85=0; cres=0; cpois=0; cdie=0; slow=0; n=1
+while [ "$n" -le "$N" ]; do
+  d0=$(dying)
+  z=$(XAQ_DOMZ_CPUS=$PIN sh "$B" domz | tail -n 1)
+  case $z in FAIL*) echo "FAIL at cycle $n: $z"; break ;; esac
+  W=$(set -- $(xl vcpu-list DomZ-CAN 2>/dev/null | tail -n 1); echo "pCPU ${4:-?}, hard affinity ${7:-?}")
+  t0=$(date +%s); timeout 90 xl destroy DomZ-CAN > $K/destroy-$n.out 2>&1; rc=$?
+  t=$(( $(date +%s) - t0 )); sleep 3
+  cp $R/xvf.log $K/xvf-$n.log 2>/dev/null
+  p85=$(cnt XBInvalidState $K/xvf-$n.log); pres=$(cnt 'panicked at .*vhost-user-frontend' $K/xvf-$n.log); ppois=$(cnt PoisonError $K/xvf-$n.log)
+  new=$(( $(dying) - d0 ))
+  echo "RESULT cycle $n ($W): destroy rc=$rc in $t s, dying domains left=$new, XBInvalidState (main.rs:85)=$p85, reset() panics=$pres, PoisonError=$ppois"
+  [ "$p85" -gt 0 ] && c85=$((c85 + 1)); [ "$pres" -gt 0 ] && cres=$((cres + 1)); [ "$ppois" -gt 0 ] && cpois=$((cpois + 1))
+  [ "$new" -gt 0 ] && cdie=$((cdie + 1)); [ "$rc" -ne 0 ] && slow=$((slow + 1))
+  n=$((n + 1))
+done
+echo "SUMMARY teardown: $((n - 1)) of $N cycles, dying domains now $(dying) (before: $d_start), cycles with a dying domain $cdie, XBInvalidState $c85, reset() panic $cres, PoisonError $cpois, destroys that failed or timed out $slow"
+echo "frontend logs: $K/xvf-<n>.log"

@@ -42,7 +42,7 @@ case $MODE in
   b4)
     B=/src/xenvm/pi5/bench
     TEST=$R/domd-b4-rehearse.sh; CYCLES=0; [ "${3:-}" = group ] && CYCLES=1
-    EXTRA="$EXTRA $R/fake_nucleo.py $B/xaloqi-domd-load $B/xaloqi-b3-group $B/xaloqi-proc-cpu" ;;
+    EXTRA="$EXTRA $R/fake_nucleo.py $B/xaloqi-domd-load $B/xaloqi-b3-group $B/xaloqi-proc-cpu $B/xaloqi-teardown-loop" ;;
   reset)
     TEST=$R/domd-reset-proof.sh; CYCLES=${3:-6} ;;
   idle)

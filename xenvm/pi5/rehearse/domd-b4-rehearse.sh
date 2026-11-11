@@ -17,7 +17,7 @@ LIB=/usr/libexec/xaloqi-can
 mkdir -p $LIB /usr/lib/xen/boot /etc/xen
 cp isotp_probe.py can_dump.py xs-sock-relay.py uds_timing.py isotp_burst.py $LIB/
 cp vhost-device-can vhost-device-rng xen-vhost-frontend /usr/local/bin/
-cp xaloqi-can-bench xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu /usr/local/bin/
+cp xaloqi-can-bench xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu xaloqi-teardown-loop /usr/local/bin/
 chmod 755 /usr/local/bin/xaloqi-*
 cp zephyr-domz.bin /usr/lib/xen/boot/zephyr-domz-can.bin
 cp domz.cfg /etc/xen/domz.cfg
@@ -41,7 +41,7 @@ os.execv("/usr/bin/python3", ["python3", "/usr/libexec/xaloqi-can/can_dump.py", 
 STUB
 chmod 755 /usr/local/bin/candump
 echo "=== IMAGE: sha256 of the tools as installed"
-sha256sum /usr/local/bin/xaloqi-can-bench /usr/local/bin/xaloqi-domd-load /usr/local/bin/xaloqi-b3-group /usr/local/bin/xaloqi-proc-cpu | cut -c1-16,65-
+sha256sum /usr/local/bin/xaloqi-can-bench /usr/local/bin/xaloqi-domd-load /usr/local/bin/xaloqi-b3-group /usr/local/bin/xaloqi-proc-cpu /usr/local/bin/xaloqi-teardown-loop | cut -c1-16,65-
 echo "domain 1 is named: $(xenstore-read /local/domain/1/name); DomD vCPUs: $(grep -c '^processor' /proc/cpuinfo); FD=${XAQ_CAN_FD}"
 
 B up
@@ -84,6 +84,14 @@ fi   # BOOTS != 1
 echo "=== GROUP RUNNER: xaloqi-b3-group 3 2 100 (two runs of 100 samples, on a pin that holds)"
 # the stand-ins are already up: no second `up`
 XAQ_GROUP_UP=0 busybox sh /usr/local/bin/xaloqi-b3-group 3 2 100 2>&1 | grep -E '^(==|#####|===|DomZ-CAN vCPU|P2 |PASS|FAIL|GROUP)'
+
+echo "=== IDLE GROUP (cell 2 on the Pi): DomD idle, DomZ-CAN on pCPU 3, no NUCLEO cell"
+XAQ_GROUP_UP=0 XAQ_LOAD_NONE=1 XAQ_LOAD_SKIP_C=1 busybox sh /usr/local/bin/xaloqi-b3-group 3 2 100 2>&1 | grep -E '^(#####|===|DomZ-CAN vCPU|---|P2 |PASS|FAIL|GROUP|soc)'
+L status
+
+echo "=== CELL 7: create/destroy loop, 3 cycles (10 on the Pi)"
+XAQ_DOMZ_CPUS=3 busybox sh /usr/local/bin/xaloqi-teardown-loop 3 2>&1 | grep -aE '^(==|RESULT|SUMMARY|FAIL|frontend logs)'
+ls /root/teardown | tr '\n' ' '; echo
 
 echo "=== DIAG"
 echo "--- xl vcpu-list"; xl vcpu-list

@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 # zephyr-domz-can.bin and zephyr-domz-can.stamp are not in git: sodev-add.sh copies
 # them from the xenvm build (out/), and the stamp records the pins it was built from.
 # isotp_probe.py, can_dump.py and xs-sock-relay.py are copied from xenvm/harness/, the
-# xaloqi-domd-load / xaloqi-b3-group / xaloqi-proc-cpu tools from xenvm/pi5/bench/, and zre.rev
+# xaloqi-domd-load / xaloqi-b3-group / xaloqi-proc-cpu / xaloqi-teardown-loop tools from xenvm/pi5/bench/, and zre.rev
 # (the commit the image was built from) is written by sodev-add.sh.
 SRC_URI = " \
     file://zephyr-domz-can.bin \
@@ -21,6 +21,7 @@ SRC_URI = " \
     file://xaloqi-domd-load \
     file://xaloqi-b3-group \
     file://xaloqi-proc-cpu \
+    file://xaloqi-teardown-loop \
     file://zre.rev \
     file://uds_timing.py \
     file://isotp_burst.py \
@@ -42,7 +43,7 @@ do_install() {
     install -m 0644 ${S}/zephyr-domz-can.bin ${D}/usr/lib/xen/boot/zephyr-domz-can.bin
     install -m 0644 ${S}/zephyr-domz-can.stamp ${D}${datadir}/xaloqi-can/zephyr-domz-can.stamp
     install -m 0755 ${S}/xaloqi-can-bench ${D}${bindir}/xaloqi-can-bench
-    for f in xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu; do
+    for f in xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu xaloqi-teardown-loop; do
         install -m 0755 ${S}/$f ${D}${bindir}/$f
     done
     install -m 0644 ${S}/zre.rev ${D}${datadir}/xaloqi-can/zre.rev
@@ -51,7 +52,7 @@ do_install() {
     done
 }
 
-FILES:${PN} = "/usr/lib/xen/boot/zephyr-domz-can.bin ${libexecdir}/xaloqi-can ${bindir}/xaloqi-can-bench ${bindir}/xaloqi-domd-load ${bindir}/xaloqi-b3-group ${bindir}/xaloqi-proc-cpu ${datadir}/xaloqi-can"
+FILES:${PN} = "/usr/lib/xen/boot/zephyr-domz-can.bin ${libexecdir}/xaloqi-can ${bindir}/xaloqi-can-bench ${bindir}/xaloqi-domd-load ${bindir}/xaloqi-b3-group ${bindir}/xaloqi-proc-cpu ${bindir}/xaloqi-teardown-loop ${datadir}/xaloqi-can"
 # The Zephyr image is a bare-metal arm64 binary for Xen, not a Linux ELF.
 INSANE_SKIP:${PN} += "arch already-stripped"
 
