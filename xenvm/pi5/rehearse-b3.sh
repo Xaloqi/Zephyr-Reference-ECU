@@ -9,7 +9,7 @@
 #                                                destroy of a domain that never ran: xen-vhost-frontend's
 #                                                output and Xen's view of the domain after each
 # B4 (image prep, 2026-11-11), same harness:
-#   rehearse-b3.sh <xenvm-build-dir> b4          every B4 cell with the baked-in tools (placement printed, the pin
+#   rehearse-b3.sh <xenvm-build-dir> b4 [group]  every B4 cell with the baked-in tools (placement printed, the pin
 #                                                check stopping a cell on purpose, the group runner), as on the Pi
 #   rehearse-b3.sh <xenvm-build-dir> reset [N]   N (default 6) paused-then-destroyed DomZ-CAN cases: frontend
 #                                                panics and dying domains per case (the reset() fix, issue A)
@@ -41,7 +41,7 @@ case $MODE in
     TEST=$R/domd-teardown.sh; CYCLES=${3:-2} ;;
   b4)
     B=/src/xenvm/pi5/bench
-    TEST=$R/domd-b4-rehearse.sh; CYCLES=0
+    TEST=$R/domd-b4-rehearse.sh; CYCLES=0; [ "${3:-}" = group ] && CYCLES=1
     EXTRA="$EXTRA $R/fake_nucleo.py $B/xaloqi-domd-load $B/xaloqi-b3-group $B/xaloqi-proc-cpu" ;;
   reset)
     TEST=$R/domd-reset-proof.sh; CYCLES=${3:-6} ;;

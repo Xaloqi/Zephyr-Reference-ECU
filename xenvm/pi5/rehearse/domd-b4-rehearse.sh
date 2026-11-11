@@ -10,7 +10,8 @@
 # Stand-ins only here: the NUCLEO is fake_nucleo.py, and candump (no can-utils in this rootfs)
 # is can_dump.py. TCG timing says nothing about the Pi; what this shows is that every cell runs
 # end to end, the guest's pCPU is printed in each run, and a wrong pin stops the cell.
-#   XENVM_CAN_BOOTS   unused; B4_IDLE_SECS (default 20) is the busy-poll window of cell 5
+#   XENVM_CAN_BOOTS   0: everything; 1: only the group runner (`rehearse-b3.sh <build> b4 group`);
+#   B4_IDLE_SECS (default 20) is the busy-poll window of cell 5
 cd /root
 LIB=/usr/libexec/xaloqi-can
 mkdir -p $LIB /usr/lib/xen/boot /etc/xen
@@ -25,7 +26,7 @@ xenstore-write /local/pool/0/name Pool-0 /tool/xenconsoled/domid 1 \
   /local/domain/1/name Dom0less-1 /local/domain/1/domid 1
 XENCONSOLED_TRACE=guest /usr/sbin/xenconsoled --pid-file=/run/xenconsoled.pid \
   --log=guest --log-dir=/var/log/xen/console
-FD=; [ -f can.env ] && . ./can.env
+FD=; BOOTS=0; [ -f can.env ] && . ./can.env
 for v in can0 can1; do ip link add dev $v type vcan; done
 export XAQ_VIRTUAL=1 XAQ_BACKEND_TYPE= XAQ_LOGDIR=/root/log XAQ_P2_MAX_MS=1000
 export XAQ_CAN_FD=${FD:-0}
@@ -39,7 +40,7 @@ import os, sys
 os.execv("/usr/bin/python3", ["python3", "/usr/libexec/xaloqi-can/can_dump.py", "can1", "100000", "1000000000", "X"])
 STUB
 chmod 755 /usr/local/bin/candump
-echo "=== IMAGE: image tools and the rev they were built from"
+echo "=== IMAGE: sha256 of the tools as installed"
 sha256sum /usr/local/bin/xaloqi-can-bench /usr/local/bin/xaloqi-domd-load /usr/local/bin/xaloqi-b3-group /usr/local/bin/xaloqi-proc-cpu | cut -c1-16,65-
 echo "domain 1 is named: $(xenstore-read /local/domain/1/name); DomD vCPUs: $(grep -c '^processor' /proc/cpuinfo); FD=${XAQ_CAN_FD}"
 
@@ -49,6 +50,7 @@ python3 fake_nucleo.py can0 $([ "$XAQ_CAN_FD" = 1 ] && echo fd) > nucleo.log 2>&
 for i in $(seq 1 100); do grep -q bridge bridge.log && grep -q 'fake NUCLEO' nucleo.log && break; sleep 0.1; done
 P2='^(P2 |PASS|FAIL)'
 
+if [ "$BOOTS" != 1 ]; then
 echo "=== CELL 1 (A): NUCLEO reference, DomD idle"
 B nucleo | grep -E '^(PASS|FAIL)'
 B p2 0 200 | grep -E "$P2"
@@ -78,8 +80,10 @@ echo "=== CELL 5: busy-poll, vhost-device-can CPU with DomZ-CAN up and the bus i
 Bp 3 domz can0 | grep -E '^(PASS|FAIL)'
 busybox sh /usr/local/bin/xaloqi-proc-cpu vhost-device-can ${B4_IDLE_SECS:-20} 5
 
+fi   # BOOTS != 1
 echo "=== GROUP RUNNER: xaloqi-b3-group 3 2 100 (two runs of 100 samples, on a pin that holds)"
-busybox sh /usr/local/bin/xaloqi-b3-group 3 2 100 2>&1 | grep -E '^(==|#####|===|DomZ-CAN vCPU|P2 |PASS|FAIL|GROUP)'
+# the stand-ins are already up: no second `up`
+XAQ_GROUP_UP=0 busybox sh /usr/local/bin/xaloqi-b3-group 3 2 100 2>&1 | grep -E '^(==|#####|===|DomZ-CAN vCPU|P2 |PASS|FAIL|GROUP)'
 
 echo "=== DIAG"
 echo "--- xl vcpu-list"; xl vcpu-list

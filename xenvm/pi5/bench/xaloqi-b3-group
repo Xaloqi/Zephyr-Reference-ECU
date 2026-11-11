@@ -18,7 +18,8 @@ set -u
 PIN=${1:?pCPU for DomZ-CAN}; RUNS=${2:-3}; SAMPLES=${3:-1000}
 B=$(command -v xaloqi-can-bench) || { echo "FAIL: xaloqi-can-bench not found"; exit 1; }
 L=${XAQ_LOAD_TOOL:-$(dirname "$0")/xaloqi-domd-load}
-echo "== up $(date +%T)"; sh "$B" up 2>&1 | tail -n 1
+# XAQ_GROUP_UP=0: the bus is already up (the QEMU rehearsal's stand-ins would be orphaned by a second `up`)
+if [ "${XAQ_GROUP_UP:-1}" = 1 ]; then echo "== up $(date +%T)"; sh "$B" up 2>&1 | tail -n 1; fi
 xl list
 run=1
 while [ "$run" -le "$RUNS" ]; do
