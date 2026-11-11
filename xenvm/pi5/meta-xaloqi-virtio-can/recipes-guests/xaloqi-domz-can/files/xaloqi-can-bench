@@ -119,6 +119,11 @@ backends() { # <bus>
   # rehearsal's canary). Destroy it before the backends restart.
   xl destroy $NAME 2>/dev/null
   stop_backends
+  # A relay that died leaves its socket file behind, and every xl call then fails with
+  # "Unable to set virtio defaults" (ZRE#63): drop the socket of a relay we started that is gone.
+  if [ -s $RUN/relay.pid ] && ! kill -0 "$(cat $RUN/relay.pid)" 2>/dev/null; then
+    rm -f /var/run/xenstored/socket
+  fi
   if [ ! -S /var/run/xenstored/socket ]; then
     # SoDeV's xenstore server is in the Zephyr Dom0; DomD has only /dev/xen/xenbus.
     python3 $LIB/xs-sock-relay.py > $RUN/relay.log 2>&1 &
