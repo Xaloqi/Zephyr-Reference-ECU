@@ -8,8 +8,8 @@
 # XAQ_LOAD_SKIP_C=1 leaves out cell C (no NUCLEO on the bus).
 #
 # Why a script, and why from a fresh boot (B3 findings, 2026-11-11):
-#   - every create/destroy cycle leaves a dying domain; with two of them pinned to pCPU 0 the next
-#     DomZ-CAN cannot be created, so a group of 3 on pCPU 0 needs a boot of its own
+#   - every create/destroy cycle leaves a dying domain, and a later DomZ-CAN create can fail once they
+#     exist (FD image, pCPU 0, twice), so a group of 3 gets a boot of its own
 #   - xs-sock-relay leaks an fd per client (ZRE#63): raise the limit and drop a stale socket
 #   - an image whose bench tool still says backend=DomD needs domain 1 renamed
 set -u

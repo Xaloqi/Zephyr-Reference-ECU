@@ -137,18 +137,19 @@ a fresh DomZ-CAN per run, **with vhost-device-can's busy-poll present** (unpatch
 |---|---|---|---|---|---|
 | NUCLEO, DomD idle (classic) | 1 | 0.388 | 0.403 | 0.412 | 1.091 |
 | NUCLEO, DomD loaded (classic) | 5 | 0.32 to 0.39 | 0.81 to 1.09 | 1.15 to 1.22 | 1.24 to 1.31 |
-| DomZ-CAN pCPU 0, DomD loaded (classic) | 2 | 18.6 / 18.7 | 29.5 / 30.8 | 49.4 / 45.4 | 59.7 / 57.3 |
-| DomZ-CAN pCPU 3, DomD loaded (classic) | 3 | 19.2 / 19.4 / 18.3 | 29.5 / 37.1 / 31.6 | 49.1 / 49.2 / 47.4 | 49.8 / 61.5 / 67.4 |
+| DomZ-CAN on pCPU 0, DomD loaded (classic, 5 runs: 2 asked for pCPU 0, 3 asked for pCPU 3 and ignored) | 5 | 18.3 to 19.4 | 29.5 to 37.1 | 45.4 to 49.4 | 49.8 to 67.4 |
 | DomZ-CAN pCPU 3, DomD idle (FD) | 1 | 1.515 | 1.941 | 4.121 | 7.924 |
 | DomZ-CAN pCPU 3, DomD loaded (FD) | 3 | 3.5 / 3.3 / 3.5 | 11.5 / 11.3 / 11.5 | 15.5 / 12.8 / 14.9 | 19.5 / 17.3 / 16.9 |
 | DomZ-CAN pCPU 0, DomD loaded (FD) | 2 | 19.5 / 19.5 | 30.7 / 29.6 | 49.5 / 49.0 | 60.0 / 63.5 |
 
-A loaded DomD leaves the NUCLEO alone and moves DomZ-CAN from about 1 ms to about 19 ms (50 to 67 ms max), and
-pinning it to its own core does not help on the classic image: the cost is on DomD's side of the virtio-can
-path. FD on pCPU 3 is the exception (3.5 ms); not explained (the classic runs measured cell C, about 40 s of
-load, before cell D). The classic image's bench tool predates the 11-09 fixes, so its 2 to 3 NUCLEO timeouts
-are probably the old tool. Full record and the EDS#562 download numbers:
-`xaloqi-knowledge/campaigns/2026-11-11-b3-bench-results.md`.
+A loaded DomD leaves the NUCLEO alone. DomZ-CAN on pCPU 0, the core it shares with DomD's vCPU 0 (running a busy loop),
+goes from about 1 ms idle to about 19 ms median and 50 to 67 ms max, on both images. On its own core (FD, pCPU 3) it
+holds 3.5 ms median and under 20 ms max, so placement matters under load as it did idle. The classic image's bench
+tool predates `XAQ_DOMZ_CPUS`, so its cells asked for pCPU 3 ran on pCPU 0 (hard affinity `0 / all` in
+`xl vcpu-list`); there is no classic pCPU 3 loaded result. The tool now prints the guest's pCPU in each run, and
+`xaloqi-domd-load cell` stops if it is not the one asked for. The classic tool is also the pre-fix one, so the 2 to 3
+NUCLEO timeouts in the classic runs are probably its old timeout counting. Full record and the EDS#562 download
+numbers: `xaloqi-knowledge/campaigns/2026-11-11-b3-bench-results.md`.
 
 ### Pinning DomZ-CAN
 
@@ -180,8 +181,9 @@ else uses.
 - A destroyed DomZ-CAN domain stays "dying" (one per create/destroy cycle from a boot's second create).
   Killing the stale `xl create -p` or `xen-vhost-frontend` does not free it (it does under QEMU).
   xen-vhost-frontend's threads panic at every create (`src/main.rs:85:56`, `XBInvalidState`) and the
-  guest still works; with two dying domains pinned to pCPU 0 the next create fails (`PoisonError` in
-  the frontend). So run one group of loaded cells per boot (`bench/xaloqi-b3-group`).
+  guest still works; a later create can fail (`PoisonError` in the frontend; twice, on the FD image's
+  pCPU 0 runs, while three creates in a row also worked elsewhere). So run one group of loaded cells per
+  boot (`bench/xaloqi-b3-group`).
 - `xs-sock-relay.py` leaks a xenbus fd per client and dies at 1,024 fds, after which every `xl create`
   fails ([#63](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/63)).
 - DomD's `flat L2 bridge activation` unit fails at boot (SoDeV's networking). It does not
