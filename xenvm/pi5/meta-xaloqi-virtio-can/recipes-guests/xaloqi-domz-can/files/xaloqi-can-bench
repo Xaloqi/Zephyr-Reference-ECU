@@ -209,7 +209,9 @@ domz() {
   grep -q 'TX=0x7E9 PHYS=0x7E1' "$L.console" || fail "$NAME is not ECU 1 (no 'TX=0x7E9 PHYS=0x7E1' at boot)"
   answered "$L" || fail "$NAME did not answer every request ($L)"
   grep -q 'WIRE can1 7E9 ' "$L.wire" || fail "no 0x7E9 frame on $TESTER: the answer did not cross the bus"
-  pass "$NAME (ECU 1) answered over virtio-can (backend on $bus) and the physical bus ($L)"
+  # Where the guest really runs: XAQ_DOMZ_CPUS is silently ignored by a tool that predates it.
+  W=$(set -- $(xl vcpu-list $NAME | tail -n 1); echo "pCPU $4, hard affinity $7")
+  pass "$NAME (ECU 1) answered over virtio-can (backend on $bus) and the physical bus ($L); vCPU on $W"
 }
 
 canary() {

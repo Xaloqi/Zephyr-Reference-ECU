@@ -1,0 +1,149 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Xaloqi
+#
+# DomD load for the Pi 5 bench cells C/D (P2 with DomD loaded). One file, POSIX sh
+# (busybox ash is enough), no dependencies beyond candump; it is sent to DomD over the
+# Xen console as base64 (xenvm/pi5/bench/console-send.py), so it must stay small.
+#
+#   xaloqi-domd-load start [SECS]   one busy loop per DomD vCPU + candump on can0 and can1
+#                                   (every frame, formatted, to /dev/null). Stops by
+#                                   itself after SECS (900) in case the console is lost.
+#   (do not pipe `start` into tail/grep: the loops inherit the pipe and hold it open)
+#   xaloqi-domd-load check          per-vCPU busy % over 2 s, from /proc/stat: PASS when
+#                                   every vCPU is at least 90 % busy
+#   xaloqi-domd-load status         what is running
+#   xaloqi-domd-load stop           kill everything this script started, PASS when gone
+#   xaloqi-domd-load cell PIN [N]   one run of cells C and D: a fresh DomZ-CAN on pCPU PIN
+#                                   (XAQ_DOMZ_CPUS), the load started and checked, P2 for
+#                                   the NUCLEO (C) and DomZ-CAN (D), N samples (1000) each,
+#                                   the load stopped again, whatever happens in between
+#
+# The busy loops run at normal priority, so the tester (uds_timing.py), the vhost
+# backends and xen-vhost-frontend compete with them as they would on a loaded DomD.
+# Cells C/D: start, check, then `xaloqi-can-bench p2 ...`, then stop.
+#
+# XAQ_LOAD_SKIP_C=1 leaves out cell C (no NUCLEO on the bus: the CAN FD HAT-only setup).
+#
+# XAQ_LOAD_CANGEN=1 also starts cangen on can0 (ID 6F0, 8 bytes, 1 ms gap, about 25 %
+# of a 500 kbit/s bus) so candump has frames to read. Off by default: without it candump
+# is nearly idle on the bench bus (the P2 traffic is 50 frames/s) and the load is the
+# busy loops. This adds bus load to the measurement; say so in the record.
+set -u
+RUN=/run/xaloqi-load
+MARK=xaloqi-busy     # argv of the busy loops: how stop finds them without a pid file
+WMARK=xaloqi-watchdog
+case $0 in /*) SELF=$0 ;; *) SELF=$PWD/$0 ;; esac
+mkdir -p "$RUN"
+pass() { echo "PASS: $*"; exit 0; }
+fail() { echo "FAIL: $*"; exit 1; }
+
+ncpu() { n=$(grep -c '^processor' /proc/cpuinfo); echo "${n:-1}"; }
+
+pids() { # pids of what this script started, found by exact argv (no substring match)
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}; [ "$p" = "$$" ] && continue
+    set -- $(tr '\0' ' ' 2>/dev/null < "$d/cmdline") || continue
+    [ $# -gt 0 ] || continue
+    last=; for a; do last=$a; done
+    case "$*" in
+      "candump -L can0 can1"|*"/candump -L can0 can1") echo "$p"; continue ;;
+      "cangen can0 -I 6F0 -L 8 -D r -g 1"|*"/cangen can0 -I 6F0 -L 8 -D r -g 1") echo "$p"; continue ;;
+    esac
+    # busy loop: sh -c <loop> MARK. The watchdog: sh -c <script> NAME SELF SECS WMARK.
+    [ "$1" = sh ] && { [ "$last" = "$MARK" ] || [ "$last" = "$WMARK" ]; } && echo "$p"
+  done
+}
+
+start() {
+  [ -n "$(pids)" ] && fail "already running (xaloqi-domd-load stop first)"
+  secs=${1:-900}
+  command -v candump > /dev/null || fail "candump not found (can-utils)"
+  for b in can0 can1; do ip link show "$b" > /dev/null 2>&1 || fail "$b missing (xaloqi-can-bench up first)"; done
+  n=$(ncpu)
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    sh -c 'while :; do :; done' "$MARK" &
+    i=$((i + 1))
+  done
+  # candump formats every frame (-L); the output goes nowhere, so tmpfs cannot fill.
+  candump -L can0 can1 > /dev/null 2>&1 &
+  if [ "${XAQ_LOAD_CANGEN:-0}" = 1 ]; then
+    cangen can0 -I 6F0 -L 8 -D r -g 1 > /dev/null 2>&1 &
+  fi
+  # Watchdog: stops the load after SECS even if nobody comes back to type `stop`.
+  # The trailing WMARK argument is only there for pids().
+  # Short sleeps, so that killing it leaves no long-running sleep behind.
+  sh -c 'i=0; while [ "$i" -lt "$2" ]; do sleep 1; i=$((i + 1)); done; sh "$1" stop > /dev/null 2>&1' \
+    xaloqi-domd-load "$SELF" "$secs" "$WMARK" &
+  sleep 1
+  pass "$n busy loop(s) + candump$([ "${XAQ_LOAD_CANGEN:-0}" = 1 ] && echo " + cangen") started, auto-stop in ${secs}s"
+}
+
+cpu_line() { sed -n "s/^cpu$1 //p" /proc/stat; }
+
+check() {
+  n=$(ncpu)
+  i=0; bad=0
+  while [ "$i" -lt "$n" ]; do
+    echo "$(cpu_line $i)" > "$RUN/a$i"; i=$((i + 1))
+  done
+  sleep 2
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    # fields: user nice system idle iowait irq softirq steal
+    set -- $(cat "$RUN/a$i"); a_idle=$(( $4 + $5 )); a_tot=0; for v in "$@"; do a_tot=$((a_tot + v)); done
+    set -- $(cpu_line $i);    b_idle=$(( $4 + $5 )); b_tot=0; for v in "$@"; do b_tot=$((b_tot + v)); done
+    dt=$((b_tot - a_tot)); di=$((b_idle - a_idle))
+    if [ "$dt" -le 0 ]; then busy=0; else busy=$(( 100 * (dt - di) / dt )); fi
+    echo "cpu$i: ${busy}% busy"
+    [ "$busy" -ge 90 ] || bad=1
+    i=$((i + 1))
+  done
+  echo "load average: $(cut -d' ' -f1-3 /proc/loadavg)"
+  # The prep record asks to watch the SoC temperature during the loaded cells.
+  [ -r /sys/class/thermal/thermal_zone0/temp ] &&
+    echo "soc temp: $(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 )) C"
+  [ "$bad" = 0 ] || fail "a vCPU is below 90 % busy (is the load started?)"
+  pass "all $n vCPU(s) at least 90 % busy"
+}
+
+status() {
+  p=$(pids)
+  [ -z "$p" ] && { echo "not running"; exit 0; }
+  for x in $p; do echo "$x $(tr '\0' ' ' < /proc/$x/cmdline)"; done
+}
+
+stop() {
+  p=$(pids)
+  [ -n "$p" ] && kill $p 2>/dev/null
+  sleep 1
+  p=$(pids)
+  [ -n "$p" ] && { kill -9 $p 2>/dev/null; sleep 1; }
+  [ -z "$(pids)" ] || fail "still running: $(pids)"
+  rm -f "$RUN"/a*
+  pass "load stopped"
+}
+
+cell() {
+  pin=${1:?pCPU for DomZ-CAN (0 = SoDeV default, 3 = its own core)}; n=${2:-1000}
+  B=$(command -v xaloqi-can-bench) || { echo "FAIL: xaloqi-can-bench not found"; exit 1; }
+  echo "=== cell C/D, DomZ-CAN on pCPU $pin, $n samples"
+  XAQ_DOMZ_CPUS=$pin sh $B domz | tail -1
+  # A bench tool older than XAQ_DOMZ_CPUS (11-09, 578ad5a) ignores the pin: say where DomZ-CAN runs, and stop.
+  W=$(set -- $(xl vcpu-list DomZ-CAN 2>/dev/null | tail -n 1); echo "${4:-?} ${7:-?}")
+  echo "DomZ-CAN vCPU: pCPU ${W% *}, hard affinity ${W#* }"
+  [ "${W#* }" = "$pin" ] || { echo "FAIL: DomZ-CAN hard affinity ${W#* }, asked for pCPU $pin (no DomZ-CAN, or a bench tool without XAQ_DOMZ_CPUS)"; exit 1; }
+  sh "$SELF" start 900 || exit 1
+  sh "$SELF" check || { sh "$SELF" stop; exit 1; }
+  [ "${XAQ_LOAD_SKIP_C:-0}" = 1 ] || { echo "--- C: NUCLEO (ECU 0), DomD loaded"; sh $B p2 0 "$n" | tail -2; }
+  echo "--- D: DomZ-CAN (ECU 1) on pCPU $pin, DomD loaded"; sh $B p2 1 "$n" | tail -2
+  sh "$SELF" check | grep -E "^(load|soc)"
+  sh "$SELF" stop
+}
+
+cmd=${1:-}; [ $# -gt 0 ] && shift
+case $cmd in
+  start|check|status|stop|cell) $cmd "$@" ;;
+  *) sed -n '5,27p' "$0"; exit 2 ;;
+esac
