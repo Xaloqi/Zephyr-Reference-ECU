@@ -36,7 +36,7 @@ loopback without ever touching the bus.
 | `meta-xaloqi-virtio-can/` | Yocto layer for SoDeV's DomD build (wrynose): recipes for vhost-device (can, rng) and xen-vhost-frontend, the CAN HAT in DomD's partial device tree, the kernel options, and the DomZ-CAN package |
 | `sodev-add.sh` | Copies the layer into a SoDeV workspace (with `../patches/` and the DomZ-CAN image) and adds it to the DomD component of `rpi5-sodev.yaml` |
 | `rehearse.sh`, `rehearse/` | Runs the bench driver end to end under QEMU, before the board exists |
-| `bench/` | Host and DomD tools for the bench sessions: `xaloqi-domd-load` (the DomD load for P2 cells C/D: start, check, stop, `cell`), `xaloqi-b3-group` (a group of loaded cells from a fresh boot), `xaloqi-proc-cpu` (CPU time of a process over a window), `console-send.py` (a file to DomD over the Xen console as base64 with a sha256 check) |
+| `bench/` | Host and DomD tools for the bench sessions: `xaloqi-domd-load` (the DomD load for P2 cells C/D: start, check, stop, `cell`), `xaloqi-b3-group` (a group of loaded cells from a fresh boot), `xaloqi-proc-cpu` (CPU time of a process over a window), `xaloqi-teardown-loop` (N create/destroy cycles of DomZ-CAN and what each leaves behind), `console-send.py` (a file to DomD over the Xen console as base64 with a sha256 check) |
 | `rehearse-b3.sh`, `rehearse/domd-load-rehearse.sh`, `rehearse/domd-teardown.sh` | DomD scripts for the same QEMU harness: the load tool end to end with P2 (`rehearse-b3.sh <build> load`), and a create/destroy loop of DomZ-CAN that records xen-vhost-frontend's output and Xen's view of the domain (`rehearse-b3.sh <build> teardown`) |
 | `rehearse-b3.sh <build> b4\|reset\|idle`, `rehearse/domd-b4-rehearse.sh`, `rehearse/domd-reset-proof.sh`, `rehearse/domd-idle-compare.sh` | The B4 rehearsals under QEMU: every bench cell with the baked-in tools (placement printed, the pin check stopped on purpose), N paused-then-destroyed DomZ-CAN cases for the `reset()` fix, and vhost-device-can's idle CPU before and after the reader-poll patch |
 | `scripts/gen-crates-inc.py` | Regenerates the recipes' crate lists from a (patched) `Cargo.lock` |
@@ -64,7 +64,7 @@ against these sources.
 
 What goes into the image, so that nothing is sent to DomD and patched live on the Pi:
 
-- `xaloqi-can-bench`, `xaloqi-domd-load`, `xaloqi-b3-group` and `xaloqi-proc-cpu` in `/usr/bin`, the relay
+- `xaloqi-can-bench`, `xaloqi-domd-load`, `xaloqi-b3-group`, `xaloqi-proc-cpu` and `xaloqi-teardown-loop` in `/usr/bin`, the relay
   (`/usr/libexec/xaloqi-can/xs-sock-relay.py`, with the fd fix of #64), and `/usr/share/xaloqi-can/zre.rev`,
   the commit the layer was copied from (`dirty=0` if the tree was clean).
 - The backends, from `xenvm/patches/`, applied in this order per repository:

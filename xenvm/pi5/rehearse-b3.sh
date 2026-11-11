@@ -26,6 +26,8 @@ BUILD=$(cd "${1:?usage: $0 <xenvm-build-dir> load|teardown|b4|reset|idle [N]}" &
 MODE=${2:?load, teardown, b4, reset or idle}
 grep -q ' ecu=1 ' "$BUILD/out/zephyr-domz-can.stamp" 2>/dev/null \
   || { echo "FAIL: $BUILD has no DomZ image built as ECU 1 (XENVM_CAN_ECU_INDEX=1 xenvm/run.sh can)"; exit 1; }
+# An FD DomZ image (stamp "fd=1") is rehearsed on FD buses: the harness reads this as can.env FD=1.
+XENVM_CAN_FD=; grep -q ' fd=1 ' "$BUILD/out/zephyr-domz-can.stamp" 2>/dev/null && XENVM_CAN_FD=1
 F=/src/xenvm/pi5/meta-xaloqi-virtio-can/recipes-guests/xaloqi-domz-can/files
 R=/src/xenvm/pi5/rehearse
 EXTRA="$R/can_bridge.py $F/uds_timing.py $F/isotp_burst.py $F/xaloqi-can-bench"
@@ -53,7 +55,7 @@ case $MODE in
   *) echo "usage: $0 <xenvm-build-dir> load|teardown|b4|reset|idle [N]"; exit 2 ;;
 esac
 docker run --rm -v "$REPO":/src:ro -v "$BUILD":/build \
-  -e XENVM_BOOT_TIMEOUT=$(( ${XENVM_DOMD_WAIT:-900} + 1500 )) -e XENVM_DOMD_WAIT=${XENVM_DOMD_WAIT:-900} -e XENVM_CAN_BOOTS=$CYCLES -e XENVM_CAN_ECU_INDEX=1 \
+  -e XENVM_BOOT_TIMEOUT=$(( ${XENVM_DOMD_WAIT:-900} + 1500 )) -e XENVM_DOMD_WAIT=${XENVM_DOMD_WAIT:-900} -e XENVM_CAN_BOOTS=$CYCLES -e XENVM_CAN_ECU_INDEX=1 -e XENVM_CAN_FD=$XENVM_CAN_FD \
   -e XENVM_CAN_DOMD_TEST=$TEST -e XENVM_CAN_EXTRA="$EXTRA" \
   xaloqi-zre-xenvm-builder:1 \
   bash -c "/src/xenvm/scripts/boot.sh can; rc=\$?; chown -R $(id -u):$(id -g) /build; exit \$rc"
