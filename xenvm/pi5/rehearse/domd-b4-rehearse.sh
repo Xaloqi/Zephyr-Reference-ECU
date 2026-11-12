@@ -89,8 +89,8 @@ echo "=== IDLE GROUP (cell 2 on the Pi): DomD idle, DomZ-CAN on pCPU 3, no NUCLE
 XAQ_GROUP_UP=0 XAQ_LOAD_NONE=1 XAQ_LOAD_SKIP_C=1 busybox sh /usr/local/bin/xaloqi-b3-group 3 2 100 2>&1 | grep -E '^(#####|===|DomZ-CAN vCPU|---|P2 |PASS|FAIL|GROUP|soc)'
 L status
 
-echo "=== CELL 7: create/destroy loop, 3 cycles (10 on the Pi)"
-XAQ_DOMZ_CPUS=3 busybox sh /usr/local/bin/xaloqi-teardown-loop 3 2>&1 | grep -aE '^(==|RESULT|SUMMARY|FAIL|frontend logs)'
+echo "=== CELL 7: create/destroy loop, 3 cycles (10 on the Pi); the stand-ins are up, so XAQ_LOOP_UP=0 (on the Pi the loop runs up itself)"
+XAQ_LOOP_UP=0 XAQ_DOMZ_CPUS=3 busybox sh /usr/local/bin/xaloqi-teardown-loop 3 2>&1 | grep -aE '^(==|RESULT|SUMMARY|FAIL|frontend logs)'
 ls /root/teardown | tr '\n' ' '; echo
 
 echo "=== DIAG"

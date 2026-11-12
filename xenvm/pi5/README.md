@@ -191,11 +191,14 @@ in two of them (18.9 and 42.4 ms) are runs with `echo_late` set (the answer arri
 send time is the reference and the delay is the tester's own), not slow answers.
 
 On its own core the loaded DomZ-CAN is now at 0.5 to 1.4 ms median on the classic image (there was no classic pCPU 3 result
-before) and 1.5 ms on FD (3.5 ms with the busy-poll). On pCPU 0 nothing changed (about 19 ms with and without the fix),
-so that penalty is not the reader's CPU use. vhost-device-can's CPU with DomZ-CAN up and the bus idle went from 100 % of one
-vCPU (11-07 image) to 0.01 % (60 s windows; QEMU rehearsal 97.5 % to 0.20 %).
+before) and 1.5 ms on FD (3.5 ms without the reader fix). **Classic pCPU 3 missed 25 ms in two of its three runs** (max 39.3 and 42.8 ms,
+p99 26.6 and 31.2 ms; the third run's max is 8.7 ms). These are not echo artefacts: all three DomZ-CAN summaries have `echo_late=0`, so the max
+without flagged samples is the same figure. The FD image's pCPU 3 runs stayed under 10 ms. On pCPU 0 nothing changed (about 19 ms with
+and without the fix), so that penalty is not the reader's CPU use. vhost-device-can's CPU with DomZ-CAN up and the bus idle went from 100 % of one
+vCPU (11-07 image) to 0.01 % with the reader fix in the image (60 s windows; QEMU rehearsal 97.5 % to 0.20 %).
 
-A 10-cycle create/destroy loop (`bench/xaloqi-teardown-loop`, FD image, pCPU 3): every destroy returned in 10 to 11 s, no
+A 10-cycle create/destroy loop (`bench/xaloqi-teardown-loop`, FD image, pCPU 3; the loop now runs `xaloqi-can-bench up` itself,
+the image tested did not and needed `up` first): every destroy returned in 10 to 11 s, no
 `reset()` panic, no `PoisonError`, `XBInvalidState` at `main.rs:85:56` in all ten, and four dying domains at the end (not
 one per create).
 

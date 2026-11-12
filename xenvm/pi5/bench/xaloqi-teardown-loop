@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Xaloqi
 # B4 cell 7: N create/destroy cycles of DomZ-CAN, and what each one leaves behind (POSIX sh, busybox is enough):
-#   xaloqi-teardown-loop [N]        N (10) cycles; DomZ-CAN on pCPU $XAQ_DOMZ_CPUS (3)
+#   xaloqi-teardown-loop [N]        N (10) cycles; DomZ-CAN on pCPU $XAQ_DOMZ_CPUS (3); brings the bus up first
+#                                   (XAQ_LOOP_UP=0 if it is up already)
 # Each cycle: `xaloqi-can-bench domz` (fresh backends and frontend, a DomZ-CAN that answers), then
 # `xl destroy` (90 s limit), then a 3 s pause. After each destroy it prints one RESULT line: how long
 # the destroy took, dying domains it left (`(null) --p--d` in xl list), and the frontend's panics by
@@ -14,6 +15,12 @@ set -u
 N=${1:-10}; PIN=${XAQ_DOMZ_CPUS:-3}
 B=$(command -v xaloqi-can-bench) || { echo "FAIL: xaloqi-can-bench not found"; exit 1; }
 R=/run/xaloqi-can; K=/root/teardown; mkdir -p $K
+# `domz` needs can0/can1 up, which a fresh boot does not have (B4: cycle 1 failed on a down can1).
+# XAQ_LOOP_UP=0: the bus is already up (the QEMU rehearsal's stand-ins would be orphaned by a second `up`)
+if [ "${XAQ_LOOP_UP:-1}" = 1 ]; then
+  u=$(sh "$B" up 2>&1 | tail -n 1)
+  case $u in PASS*) ;; *) echo "FAIL: xaloqi-can-bench up did not bring the bus up: $u"; exit 1 ;; esac
+fi
 dying() { xl list | grep -c '(null)'; }
 cnt() { grep -c "$1" "$2" 2>/dev/null; }
 d_start=$(dying); echo "== teardown loop: $N cycles, DomZ-CAN on pCPU $PIN, $d_start dying domain(s) before"
