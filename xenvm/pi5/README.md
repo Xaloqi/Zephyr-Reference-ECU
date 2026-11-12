@@ -171,6 +171,34 @@ tool predates `XAQ_DOMZ_CPUS`, so its cells asked for pCPU 3 ran on pCPU 0 (hard
 NUCLEO timeouts in the classic runs are probably its old timeout counting. Per-run numbers on request; the
 EDS#562 download numbers are in that issue.
 
+### Results, with the reader fix and the `reset()` fix (2026-11-12)
+
+The images carry a backport of [rust-vmm/vhost-device#1020](https://github.com/rust-vmm/vhost-device/pull/1020) (the reader no longer busy-polls)
+and the `reset()` fix. Same load and method as above; every run printed the pCPU it was asked for, hard affinity the same.
+Values in ms, three runs each unless stated.
+
+| Cell | Median | p95 | p99 | Max |
+|---|---|---|---|---|
+| NUCLEO, DomD idle (classic, 1 run) | 0.406 | 0.421 | 0.425 | 0.836 |
+| DomZ-CAN pCPU 3, DomD loaded (classic) | 1.4 / 0.5 / 1.1 | 18.7 / 2.0 / 18.2 | 26.6 / 5.0 / 31.2 | 39.3 / 8.7 / 42.8 |
+| DomZ-CAN pCPU 0, DomD loaded (classic) | 16.4 / 18.1 / 16.4 | 28.4 / 39.5 / 30.5 | 38.6 / 52.1 / 40.0 | 50.5 / 79.4 / 59.7 |
+| DomZ-CAN pCPU 3, DomD idle (FD, 1 run) | 1.520 | | | 1.818 |
+| DomZ-CAN pCPU 3, DomD loaded (FD) | 1.50 / 1.52 / 1.50 | 1.8 / 1.8 / 2.0 | 4.8 / 5.4 / 3.4 | 5.9 / 9.6 / 6.0 |
+| DomZ-CAN pCPU 0, DomD loaded (FD) | 19.4 / 19.5 / 19.4 | 35.4 / 29.7 / 39.4 | 49.6 / 49.6 / 49.8 | 59.6 / 59.6 / 59.9 |
+
+All requests were answered in every run. The NUCLEO rows under load stay at 0.37 to 0.48 ms median; the larger maxima
+in two of them (18.9 and 42.4 ms) are runs with `echo_late` set (the answer arrived before the tester's echo, so the
+send time is the reference and the delay is the tester's own), not slow answers.
+
+On its own core the loaded DomZ-CAN is now at 0.5 to 1.4 ms median on the classic image (there was no classic pCPU 3 result
+before) and 1.5 ms on FD (3.5 ms with the busy-poll). On pCPU 0 nothing changed (about 19 ms with and without the fix),
+so that penalty is not the reader's CPU use. vhost-device-can's CPU with DomZ-CAN up and the bus idle went from 100 % of one
+vCPU (11-07 image) to 0.01 % (60 s windows; QEMU rehearsal 97.5 % to 0.20 %).
+
+A 10-cycle create/destroy loop (`bench/xaloqi-teardown-loop`, FD image, pCPU 3): every destroy returned in 10 to 11 s, no
+`reset()` panic, no `PoisonError`, `XBInvalidState` at `main.rs:85:56` in all ten, and four dying domains at the end (not
+one per create).
+
 ### Pinning DomZ-CAN
 
 `XAQ_DOMZ_CPUS` replaces the `cpus =` line of SoDeV's `domz.cfg` in the config
@@ -198,8 +226,8 @@ else uses.
 
 ### Known issues
 
-- A destroyed DomZ-CAN domain stays "dying" (one per create/destroy cycle from a boot's second create).
-  Killing the stale `xl create -p` or `xen-vhost-frontend` does not free it (it does under QEMU).
+- A destroyed DomZ-CAN domain stays "dying" (usually one per create/destroy cycle from a boot's second create; in a 10-cycle
+  loop on the FD image only some were left, see above). It still happens with the `reset()` fix. Killing the stale `xl create -p` or `xen-vhost-frontend` does not free it (it does under QEMU).
   xen-vhost-frontend's threads panic at every create (`src/main.rs:85:56`, `XBInvalidState`) and the
   guest still works; a later create can fail (`PoisonError` in the frontend; twice, on the FD image's
   pCPU 0 runs, while three creates in a row also worked elsewhere). So run one group of loaded cells per
@@ -209,7 +237,7 @@ else uses.
 - DomD's `flat L2 bridge activation` unit fails at boot (SoDeV's networking). It does not
   affect CAN.
 - vhost-device-can's reader busy-polls a DomD vCPU while a backend runs
-  ([rust-vmm/vhost-device#1009](https://github.com/rust-vmm/vhost-device/issues/1009)).
+  ([rust-vmm/vhost-device#1009](https://github.com/rust-vmm/vhost-device/issues/1009)); fixed in the B4 images (built 2026-11-11) by a backport of #1020.
 - VIRTIO 1.4 has no bit for bitrate switching, so DomZ-CAN's FD frames go out without BRS
   (the tester's frames have it).
 
