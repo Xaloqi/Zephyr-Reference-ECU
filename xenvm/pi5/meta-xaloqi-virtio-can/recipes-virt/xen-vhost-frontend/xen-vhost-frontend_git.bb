@@ -22,7 +22,9 @@ SRC_URI = "git://github.com/vireshk/xen-vhost-frontend.git;protocol=https;nobran
            git://github.com/vireshk/vhost.git;protocol=https;nobranch=1;name=vhost;destsuffix=vireshk-vhost \
            git://github.com/mathieupoirier/xen-sys.git;protocol=https;nobranch=1;name=xensys;destsuffix=xen-sys \
            file://xen-vhost-frontend-a1e333c5.patch \
+           file://xen-vhost-frontend-a1e333c5-teardown.patch \
            file://vireshk-vhost-abf24853.patch;patchdir=../vireshk-vhost \
+           file://vireshk-vhost-abf24853-reset.patch;patchdir=../vireshk-vhost \
            file://xen-sys-8a234c94.patch;patchdir=../xen-sys \
           "
 SRCREV_xvf = "a1e333c5e358e462e81427c793d291f3a033cf94"

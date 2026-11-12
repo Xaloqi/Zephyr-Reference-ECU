@@ -36,8 +36,9 @@ loopback without ever touching the bus.
 | `meta-xaloqi-virtio-can/` | Yocto layer for SoDeV's DomD build (wrynose): recipes for vhost-device (can, rng) and xen-vhost-frontend, the CAN HAT in DomD's partial device tree, the kernel options, and the DomZ-CAN package |
 | `sodev-add.sh` | Copies the layer into a SoDeV workspace (with `../patches/` and the DomZ-CAN image) and adds it to the DomD component of `rpi5-sodev.yaml` |
 | `rehearse.sh`, `rehearse/` | Runs the bench driver end to end under QEMU, before the board exists |
-| `bench/` | Host and DomD tools for the bench sessions: `xaloqi-domd-load` (the DomD load for P2 cells C/D: start, check, stop, `cell`), `xaloqi-b3-group` (a group of loaded cells from a fresh boot), `console-send.py` (a file to DomD over the Xen console as base64 with a sha256 check) |
+| `bench/` | Host and DomD tools for the bench sessions: `xaloqi-domd-load` (the DomD load for P2 cells C/D: start, check, stop, `cell`), `xaloqi-b3-group` (a group of loaded cells from a fresh boot), `xaloqi-proc-cpu` (CPU time of a process over a window), `xaloqi-teardown-loop` (N create/destroy cycles of DomZ-CAN and what each leaves behind), `console-send.py` (a file to DomD over the Xen console as base64 with a sha256 check) |
 | `rehearse-b3.sh`, `rehearse/domd-load-rehearse.sh`, `rehearse/domd-teardown.sh` | DomD scripts for the same QEMU harness: the load tool end to end with P2 (`rehearse-b3.sh <build> load`), and a create/destroy loop of DomZ-CAN that records xen-vhost-frontend's output and Xen's view of the domain (`rehearse-b3.sh <build> teardown`) |
+| `rehearse-b3.sh <build> b4\|reset\|idle`, `rehearse/domd-b4-rehearse.sh`, `rehearse/domd-reset-proof.sh`, `rehearse/domd-idle-compare.sh` | The B4 rehearsals under QEMU: every bench cell with the baked-in tools (placement printed, the pin check stopped on purpose), N paused-then-destroyed DomZ-CAN cases for the `reset()` fix, and vhost-device-can's idle CPU before and after the reader-poll patch |
 | `scripts/gen-crates-inc.py` | Regenerates the recipes' crate lists from a (patched) `Cargo.lock` |
 
 In the SD image, DomD gets `xaloqi-can-bench`, one subcommand per bench step
@@ -60,6 +61,25 @@ xenvm/pi5/sodev-add.sh sodev xenvm/build-ecu1
 
 `sodev-add.sh` refuses a DomZ image that was not built as ECU 1, or that is stale
 against these sources.
+
+What goes into the image, so that nothing is sent to DomD and patched live on the Pi:
+
+- `xaloqi-can-bench`, `xaloqi-domd-load`, `xaloqi-b3-group`, `xaloqi-proc-cpu` and `xaloqi-teardown-loop` in `/usr/bin`, the relay
+  (`/usr/libexec/xaloqi-can/xs-sock-relay.py`, with the fd fix of #64), and `/usr/share/xaloqi-can/zre.rev`,
+  the commit the layer was copied from (`dirty=0` if the tree was clean).
+- The backends, from `xenvm/patches/`, applied in this order per repository:
+  - vhost-device: `vhost-device-c0bfee92.patch` (#924), then `vhost-device-c0bfee92-reader-poll.patch` (the
+    reader change of #1020, backported onto this pin: the reader no longer busy-polls a vCPU; drop on pin bump)
+  - vireshk/vhost: `vireshk-vhost-abf24853.patch`, then `vireshk-vhost-abf24853-reset.patch` (`reset()` returns the
+    interrupt of a never-activated device instead of panicking)
+  - xen-sys: `xen-sys-8a234c94.patch`
+  - xen-vhost-frontend: `xen-vhost-frontend-a1e333c5.patch`, then `xen-vhost-frontend-a1e333c5-teardown.patch`
+    (the ioreq range is released even if a reset or shutdown panics; a poisoned lock is taken back)
+- EDS v1.28.0 in DomZ-CAN (pinned in `west.yml` and `versions.env`).
+
+In DomD, `cat /usr/share/xaloqi-can/zre.rev`, `xl vcpu-list` and the PASS line of `xaloqi-can-bench domz` (it ends
+with the pCPU the guest got) say what the image is and where DomZ-CAN runs. To rehearse every bench cell before the
+board: `xenvm/pi5/rehearse-b3.sh <build> b4` (needs `XENVM_DOMD_WAIT=2400`).
 
 ### CAN FD: the Waveshare 2-CH CAN FD HAT
 
@@ -143,13 +163,44 @@ a fresh DomZ-CAN per run, **with vhost-device-can's busy-poll present** (unpatch
 | DomZ-CAN pCPU 0, DomD loaded (FD) | 2 | 19.5 / 19.5 | 30.7 / 29.6 | 49.5 / 49.0 | 60.0 / 63.5 |
 
 A loaded DomD leaves the NUCLEO alone. DomZ-CAN on pCPU 0, the core it shares with DomD's vCPU 0 (running a busy loop),
-goes from about 1 ms idle to about 19 ms median and 50 to 67 ms max, on both images. On its own core (FD, pCPU 3) it
+goes from 1.7 to 4.5 ms median idle on the classic image (1.0 to 3.2 ms on FD; 11-09, above) to about 19 ms median and 50 to 67 ms max loaded, on both images. On its own core (FD, pCPU 3) it
 holds 3.5 ms median and under 20 ms max, so placement matters under load as it did idle. The classic image's bench
 tool predates `XAQ_DOMZ_CPUS`, so its cells asked for pCPU 3 ran on pCPU 0 (hard affinity `0 / all` in
 `xl vcpu-list`); there is no classic pCPU 3 loaded result. The tool now prints the guest's pCPU in each run, and
 `xaloqi-domd-load cell` stops if it is not the one asked for. The classic tool is also the pre-fix one, so the 2 to 3
-NUCLEO timeouts in the classic runs are probably its old timeout counting. Full record and the EDS#562 download
-numbers: `xaloqi-knowledge/campaigns/2026-11-11-b3-bench-results.md`.
+NUCLEO timeouts in the classic runs are probably its old timeout counting. Per-run numbers on request; the
+EDS#562 download numbers are in that issue.
+
+### Results, with the reader fix and the `reset()` fix (2026-11-12)
+
+The images carry a backport of [rust-vmm/vhost-device#1020](https://github.com/rust-vmm/vhost-device/pull/1020) (the reader no longer busy-polls)
+and the `reset()` fix. Same load and method as above; every run printed the pCPU it was asked for, hard affinity the same.
+Values in ms, three runs each unless stated.
+
+| Cell | Median | p95 | p99 | Max |
+|---|---|---|---|---|
+| NUCLEO, DomD idle (classic, 1 run) | 0.406 | 0.421 | 0.425 | 0.836 |
+| DomZ-CAN pCPU 3, DomD loaded (classic) | 1.4 / 0.5 / 1.1 | 18.7 / 2.0 / 18.2 | 26.6 / 5.0 / 31.2 | 39.3 / 8.7 / 42.8 |
+| DomZ-CAN pCPU 0, DomD loaded (classic) | 16.4 / 18.1 / 16.4 | 28.4 / 39.5 / 30.5 | 38.6 / 52.1 / 40.0 | 50.5 / 79.4 / 59.7 |
+| DomZ-CAN pCPU 3, DomD idle (FD, 1 run) | 1.520 | | | 1.818 |
+| DomZ-CAN pCPU 3, DomD loaded (FD) | 1.50 / 1.52 / 1.50 | 1.8 / 1.8 / 2.0 | 4.8 / 5.4 / 3.4 | 5.9 / 9.6 / 6.0 |
+| DomZ-CAN pCPU 0, DomD loaded (FD) | 19.4 / 19.5 / 19.4 | 35.4 / 29.7 / 39.4 | 49.6 / 49.6 / 49.8 | 59.6 / 59.6 / 59.9 |
+
+All requests were answered in every run. The NUCLEO rows under load stay at 0.37 to 0.48 ms median; the larger maxima
+in two of them (18.9 and 42.4 ms) are runs with `echo_late` set (the answer arrived before the tester's echo, so the
+send time is the reference and the delay is the tester's own), not slow answers.
+
+On its own core the loaded DomZ-CAN is now at 0.5 to 1.4 ms median on the classic image (there was no classic pCPU 3 result
+before) and 1.5 ms on FD (3.5 ms without the reader fix). **Classic pCPU 3 missed 25 ms in two of its three runs** (max 39.3 and 42.8 ms,
+p99 26.6 and 31.2 ms; the third run's max is 8.7 ms). These are not echo artefacts: all three DomZ-CAN summaries have `echo_late=0`, so the max
+without flagged samples is the same figure. The FD image's pCPU 3 runs stayed under 10 ms. On pCPU 0 nothing changed (about 19 ms with
+and without the fix), so that penalty is not the reader's CPU use. vhost-device-can's CPU with DomZ-CAN up and the bus idle went from 100 % of one
+vCPU (11-07 image) to 0.01 % with the reader fix in the image (60 s windows; QEMU rehearsal 97.5 % to 0.20 %).
+
+A 10-cycle create/destroy loop (`bench/xaloqi-teardown-loop`, FD image, pCPU 3; the loop now runs `xaloqi-can-bench up` itself,
+the image tested did not and needed `up` first): every destroy returned in 10 to 11 s, no
+`reset()` panic, no `PoisonError`, `XBInvalidState` at `main.rs:85:56` in all ten, and four dying domains at the end (not
+one per create).
 
 ### Pinning DomZ-CAN
 
@@ -178,8 +229,8 @@ else uses.
 
 ### Known issues
 
-- A destroyed DomZ-CAN domain stays "dying" (one per create/destroy cycle from a boot's second create).
-  Killing the stale `xl create -p` or `xen-vhost-frontend` does not free it (it does under QEMU).
+- A destroyed DomZ-CAN domain stays "dying" (usually one per create/destroy cycle from a boot's second create; in a 10-cycle
+  loop on the FD image only some were left, see above). It still happens with the `reset()` fix. Killing the stale `xl create -p` or `xen-vhost-frontend` does not free it (it does under QEMU).
   xen-vhost-frontend's threads panic at every create (`src/main.rs:85:56`, `XBInvalidState`) and the
   guest still works; a later create can fail (`PoisonError` in the frontend; twice, on the FD image's
   pCPU 0 runs, while three creates in a row also worked elsewhere). So run one group of loaded cells per
@@ -189,7 +240,7 @@ else uses.
 - DomD's `flat L2 bridge activation` unit fails at boot (SoDeV's networking). It does not
   affect CAN.
 - vhost-device-can's reader busy-polls a DomD vCPU while a backend runs
-  ([rust-vmm/vhost-device#1009](https://github.com/rust-vmm/vhost-device/issues/1009)).
+  ([rust-vmm/vhost-device#1009](https://github.com/rust-vmm/vhost-device/issues/1009)); fixed in the B4 images (built 2026-11-11) by a backport of #1020.
 - VIRTIO 1.4 has no bit for bitrate switching, so DomZ-CAN's FD frames go out without BRS
   (the tester's frames have it).
 

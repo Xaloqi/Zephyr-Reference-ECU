@@ -1,0 +1,97 @@
+Linaro xen-vhost-frontend a1e333c5: tear a device down even when its backend's reset or
+shutdown panics, and do not let one panicked device thread poison every later one.
+Applied after xen-vhost-frontend-a1e333c5.patch.
+
+- XenDevice::exit(): reset() and shutdown() each run under catch_unwind (and a lock that a
+  panic poisoned is taken back), so destroy_ioreq() always runs. Before, a panic in reset()
+  skipped it and the guest's ioreq server and foreign mappings stayed.
+- XenFrontend::add_device / remove_device: the FrontendGuests lock is taken with
+  PoisonError::into_inner. Before, one panic with the lock held made every later add and
+  remove panic with PoisonError, until the daemon was restarted.
+
+Not in this patch (issue B): the add_device(...).unwrap() in main.rs, which panics with
+XBInvalidState on the Raspberry Pi. It stays as it is so that the next bench run can show
+whether it still appears.
+
+Upstream: not opened (draft in xaloqi-knowledge campaigns/2026-11-10-xvf-teardown-issue-draft.md,
+issue A); target vireshk/xen-vhost-frontend. Pairs with vireshk-vhost-abf24853-reset.patch.
+
+diff --git a/src/device.rs b/src/device.rs
+index fc76d96..4b85252 100644
+--- a/src/device.rs
++++ b/src/device.rs
+@@ -7,7 +7,8 @@ use clap::Parser;
+ use seccompiler::SeccompAction;
+ use std::{
+     collections::HashMap,
+-    sync::{Arc, Mutex},
++    panic::{catch_unwind, AssertUnwindSafe},
++    sync::{Arc, Mutex, PoisonError},
+ };
+ 
+ use lazy_static::lazy_static;
+@@ -163,8 +164,19 @@ impl XenDevice {
+             interrupt.exit();
+         }
+ 
+-        self.gdev.lock().unwrap().reset();
+-        self.gdev.lock().unwrap().shutdown();
++        // The ioreq range must be released even if the backend's reset or shutdown panics,
++        // or the guest's foreign mappings and ioreq server stay and its domain cannot die.
++        let gdev = || self.gdev.lock().unwrap_or_else(PoisonError::into_inner);
++        if catch_unwind(AssertUnwindSafe(|| {
++            gdev().reset();
++        }))
++        .is_err()
++        {
++            log::error!("device {}: reset panicked, continuing the teardown", self.dev_id);
++        }
++        if catch_unwind(AssertUnwindSafe(|| gdev().shutdown())).is_err() {
++            log::error!("device {}: shutdown panicked, continuing the teardown", self.dev_id);
++        }
+ 
+         self.destroy_ioreq().ok();
+     }
+diff --git a/src/frontend.rs b/src/frontend.rs
+index 30d11c3..bdb4de6 100644
+--- a/src/frontend.rs
++++ b/src/frontend.rs
+@@ -4,7 +4,7 @@
+ // SPDX-License-Identifier: Apache-2.0
+ 
+ use std::{
+-    sync::{Arc, Mutex},
++    sync::{Arc, Mutex, MutexGuard, PoisonError},
+     thread::{self, JoinHandle},
+ };
+ 
+@@ -66,13 +66,19 @@ impl XenFrontend {
+         }))
+     }
+ 
++    // A panic in one device's thread while it held this lock must not turn every later
++    // add and remove into a PoisonError panic: the guest list is still consistent.
++    fn guests(&self) -> MutexGuard<'_, FrontendGuests> {
++        self.guests.lock().unwrap_or_else(PoisonError::into_inner)
++    }
++
+     pub fn add_device(&self, fe_domid: u16, dev_id: u32) -> Result<()> {
+         // TODO: We need some sign that all devid subdirs are already written to
+         // Xenstore, so it's time to parse them. This delay although works, doesn't
+         // guarantee that.
+         thread::sleep(std::time::Duration::from_millis(400));
+ 
+-        let dev = self.guests.lock().unwrap().add_device(fe_domid, dev_id)?;
++        let dev = self.guests().add_device(fe_domid, dev_id)?;
+ 
+         // Device is ready to accept ioreq() updates now, lets enable that.
+         dev.setup_ioreq()?;
+@@ -80,7 +86,7 @@ impl XenFrontend {
+     }
+ 
+     pub fn remove_device(&self, fe_domid: u16, dev_id: u32) {
+-        self.guests.lock().unwrap().remove_device(fe_domid, dev_id);
++        self.guests().remove_device(fe_domid, dev_id);
+     }
+ 
+     pub fn push(&self, handle: JoinHandle<()>) {

@@ -17,7 +17,9 @@ echo "P1-DOM0: kernel $(uname -r), /proc/xen/capabilities=[$(cat /proc/xen/capab
 /usr/sbin/xenstored --pid-file /run/xenstored.pid --master-domid 0 --priv-domid 1
 echo "P1-DOM0: xenstored up (--master-domid 0 --priv-domid 1); Dom0 runs nothing else"
 # Wait for DomD to finish, then power the machine off.
-for i in $(seq 1 450); do
+# xaloqi.wait=SECONDS on Dom0's command line (XENVM_DOMD_WAIT, scripts/boot.sh) raises the 900 s default.
+WAIT=$(sed -n 's/.*xaloqi\.wait=\([0-9][0-9]*\).*/\1/p' /proc/cmdline); WAIT=${WAIT:-900}
+for i in $(seq 1 $((WAIT / 2))); do
   [ "$(xenstore-read /xaloqi-p1/done 2>/dev/null)" = "1" ] && break
   sleep 2
 done

@@ -10,11 +10,14 @@ LICENSE = "Apache-2.0 | BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://LICENSE-APACHE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
                     file://LICENSE-BSD-3-Clause;md5=2489db1359f496fff34bd393df63947e"
 
-# VHOST_DEVICE_REV in xenvm/versions.env. The patch is upstream PR #924 (RX
-# buffers lost until RX stops, rust-vmm/vhost-device#923), copied verbatim from
-# xenvm/patches/ by sodev-add.sh.
+# VHOST_DEVICE_REV in xenvm/versions.env. The patches are upstream PR #924 (RX
+# buffers lost until RX stops, rust-vmm/vhost-device#923) and the reader-thread
+# change of #1020 backported onto this pin (the reader busy-polled one vCPU at
+# 100%, #1009; drop on pin bump), copied verbatim from xenvm/patches/ by
+# sodev-add.sh. In this order.
 SRC_URI = "git://github.com/rust-vmm/vhost-device.git;protocol=https;nobranch=1;destsuffix=vhost-device \
            file://vhost-device-c0bfee92.patch \
+           file://vhost-device-c0bfee92-reader-poll.patch \
           "
 SRCREV = "c0bfee92d28ffa7199ebe894c16d877a6f216fc3"
 PV = "0.1.0+git"

@@ -12,8 +12,9 @@ buffers as there are frames.
 Not in this patch: the reader thread busy-polls its socket (one DomD vCPU at about
 97%), rust-vmm/vhost-device#1020 (https://github.com/rust-vmm/vhost-device/pull/1020,
 open, fixes #1009). It is stacked on #937 (open), which is not in c0bfee92, so it does
-not apply to this pin. It arrives with a pin bump; when #924 and #1020 have merged,
-drop this patch.
+not apply to this pin; its reader change is backported in
+vhost-device-c0bfee92-reader-poll.patch, applied after this one. When #924 and #1020
+have merged, drop both patches.
 
 diff --git a/vhost-device-can/src/can.rs b/vhost-device-can/src/can.rs
 index 47a1fbc76..e599fb443 100644

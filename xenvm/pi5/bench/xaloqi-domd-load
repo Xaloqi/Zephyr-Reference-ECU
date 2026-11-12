@@ -23,6 +23,7 @@
 # backends and xen-vhost-frontend compete with them as they would on a loaded DomD.
 # Cells C/D: start, check, then `xaloqi-can-bench p2 ...`, then stop.
 #
+# XAQ_LOAD_NONE=1 runs `cell` with DomD idle (no load started): the idle reference cells (B').
 # XAQ_LOAD_SKIP_C=1 leaves out cell C (no NUCLEO on the bus: the CAN FD HAT-only setup).
 #
 # XAQ_LOAD_CANGEN=1 also starts cangen on can0 (ID 6F0, 8 bytes, 1 ms gap, about 25 %
@@ -127,23 +128,32 @@ stop() {
 
 cell() {
   pin=${1:?pCPU for DomZ-CAN (0 = SoDeV default, 3 = its own core)}; n=${2:-1000}
+  idle=${XAQ_LOAD_NONE:-0}
   B=$(command -v xaloqi-can-bench) || { echo "FAIL: xaloqi-can-bench not found"; exit 1; }
-  echo "=== cell C/D, DomZ-CAN on pCPU $pin, $n samples"
-  XAQ_DOMZ_CPUS=$pin sh $B domz | tail -1
+  echo "=== cell C/D, DomZ-CAN on pCPU $pin, $n samples, DomD $([ "$idle" = 1 ] && echo idle || echo loaded)"
+  z=$(XAQ_DOMZ_CPUS=$pin sh $B domz | tail -1); echo "$z"
+  case $z in FAIL*) exit 1 ;; esac    # no DomZ-CAN that answers: P2 would only wait
   # A bench tool older than XAQ_DOMZ_CPUS (11-09, 578ad5a) ignores the pin: say where DomZ-CAN runs, and stop.
   W=$(set -- $(xl vcpu-list DomZ-CAN 2>/dev/null | tail -n 1); echo "${4:-?} ${7:-?}")
   echo "DomZ-CAN vCPU: pCPU ${W% *}, hard affinity ${W#* }"
   [ "${W#* }" = "$pin" ] || { echo "FAIL: DomZ-CAN hard affinity ${W#* }, asked for pCPU $pin (no DomZ-CAN, or a bench tool without XAQ_DOMZ_CPUS)"; exit 1; }
-  sh "$SELF" start 900 || exit 1
-  sh "$SELF" check || { sh "$SELF" stop; exit 1; }
-  [ "${XAQ_LOAD_SKIP_C:-0}" = 1 ] || { echo "--- C: NUCLEO (ECU 0), DomD loaded"; sh $B p2 0 "$n" | tail -2; }
-  echo "--- D: DomZ-CAN (ECU 1) on pCPU $pin, DomD loaded"; sh $B p2 1 "$n" | tail -2
-  sh "$SELF" check | grep -E "^(load|soc)"
-  sh "$SELF" stop
+  if [ "$idle" = 1 ]; then
+    [ -r /sys/class/thermal/thermal_zone0/temp ] && echo "soc temp: $(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 )) C"
+  else
+    sh "$SELF" start 900 || exit 1
+    sh "$SELF" check || { sh "$SELF" stop; exit 1; }
+  fi
+  w=$([ "$idle" = 1 ] && echo idle || echo loaded)
+  [ "${XAQ_LOAD_SKIP_C:-0}" = 1 ] || { echo "--- C: NUCLEO (ECU 0), DomD $w"; sh $B p2 0 "$n" | tail -2; }
+  echo "--- D: DomZ-CAN (ECU 1) on pCPU $pin, DomD $w"; sh $B p2 1 "$n" | tail -2
+  if [ "$idle" != 1 ]; then
+    sh "$SELF" check | grep -E "^(load|soc)"
+    sh "$SELF" stop
+  fi
 }
 
 cmd=${1:-}; [ $# -gt 0 ] && shift
 case $cmd in
   start|check|status|stop|cell) $cmd "$@" ;;
-  *) sed -n '5,27p' "$0"; exit 2 ;;
+  *) sed -n '5,/^set -u/p' "$0" | sed '$d'; exit 2 ;;
 esac
