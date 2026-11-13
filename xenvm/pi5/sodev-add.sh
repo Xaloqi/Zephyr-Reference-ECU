@@ -69,7 +69,7 @@ for h in isotp_probe.py can_dump.py xs-sock-relay.py; do cp_v "$XENVM/harness/$h
 cp_v "$BIN" "$F"; cp_v "$STAMP" "$F"
 # The bench tools are baked in, so nothing is sent to DomD and patched live on the Pi (B3: the
 # classic card carried a stale tool).
-for h in xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu xaloqi-teardown-loop; do cp_v "$HERE/bench/$h" "$F"; done
+for h in xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu xaloqi-teardown-loop xaloqi-xs-release; do cp_v "$HERE/bench/$h" "$F"; done
 # Which sources this image was built from: `cat /usr/share/xaloqi-can/zre.rev` in DomD.
 ZREDIR=$(cd "$XENVM/.." && pwd)
 printf 'commit=%s dirty=%s ecu=1%s hat=%s\n' "$(git -C "$ZREDIR" rev-parse HEAD)" \

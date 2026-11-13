@@ -113,11 +113,21 @@ nucleo() {
   pass "NUCLEO (ECU 0) answered 3E/10 03/22 F190/27 01 x2 over the physical bus ($L)"
 }
 
+# Destroy DomZ-CAN, then send XS_RELEASE for its domid. Stock xenstored frees a dying domain itself
+# (VIRQ_DOM_EXC); SoDeV's Zephyr Dom0 xenstore server only on XS_RELEASE, which `xl destroy` never
+# sends, so without it the domain stays dying and one of the server's 5 slots is lost. Best effort.
+destroy_domz() {
+  d=$(xl domid $NAME 2>/dev/null) || d=
+  xl destroy $NAME 2>/dev/null
+  [ -z "$d" ] || xaloqi-xs-release "$d" >/dev/null 2>&1 || true
+  return 0
+}
+
 backends() { # <bus>
   # A DomZ-CAN still up keeps its backend/virtio nodes; a new frontend would pick
   # them up and exit (XenIoctlError ConnectionRefused, seen in the 2026-11-01
   # rehearsal's canary). Destroy it before the backends restart.
-  xl destroy $NAME 2>/dev/null
+  destroy_domz
   stop_backends
   # A relay that died leaves its socket file behind, and every xl call then fails with
   # "Unable to set virtio defaults" (ZRE#63): drop the socket of a relay we started that is gone.
@@ -171,7 +181,7 @@ CFG
 }
 
 create() {
-  xl destroy $NAME 2>/dev/null
+  destroy_domz
   cfg
   # Paused first: the frontend must claim the slots before the guest probes them.
   xl create -p $RUN/domz-can.cfg 2>&1 | grep -v '^Parsing config' || true
@@ -183,14 +193,14 @@ create() {
   # slot 1 = 0x02000200/SPI 34 (virtio-rng). If this libxl placed them elsewhere,
   # Zephyr would probe empty slots: stop here rather than chase a silent DomZ.
   echo "$B" | grep -q '/0/base = "0x2000000"' && echo "$B" | grep -q '/0/irq = "33"' \
-    || { xl destroy $NAME; fail "virtio slot 0 is not 0x2000000/33 (see xenstore above)"; }
+    || { destroy_domz; fail "virtio slot 0 is not 0x2000000/33 (see xenstore above)"; }
   # Unpause only once xen-vhost-frontend has created both devices, plus 1 s for it to
   # start serving them (domd-test-can.sh waits 2 s). Unpausing at once lost the race
   # in 3 of 4 QEMU rehearsals on 2026-11-01: Zephyr's first read of virtio slot 0
   # took a data abort (virtio_mmio_init_common), and DomZ-CAN never started.
   for i in $(seq 1 100); do grep -q "Created device $ID / 1" $RUN/xvf.log 2>/dev/null && break; sleep 0.1; done
   grep -q "Created device $ID / 1" $RUN/xvf.log || { echo "--- xen-vhost-frontend"; cat $RUN/xvf.log
-    xl destroy $NAME; fail "xen-vhost-frontend did not create DomZ-CAN's devices ($RUN/xvf.log)"; }
+    destroy_domz; fail "xen-vhost-frontend did not create DomZ-CAN's devices ($RUN/xvf.log)"; }
   sleep 1
   xl unpause $NAME
   C=/var/log/xen/console/guest-$NAME.log
@@ -260,7 +270,7 @@ burst() {
 }
 
 down() {
-  xl destroy $NAME 2>/dev/null
+  destroy_domz
   stop_backends
   pass "$NAME destroyed, backends stopped"
 }

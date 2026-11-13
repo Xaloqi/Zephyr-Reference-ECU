@@ -8,8 +8,9 @@
 # XAQ_LOAD_SKIP_C=1 leaves out cell C (no NUCLEO on the bus).
 #
 # Why a script, and why from a fresh boot (B3 findings, 2026-11-11):
-#   - every create/destroy cycle leaves a dying domain, and a later DomZ-CAN create can fail once they
-#     exist (FD image, pCPU 0, twice), so a group of 3 gets a boot of its own
+#   - on the 2026-11-11 images every create/destroy cycle left a dying domain (SoDeV's Dom0 xenstore server frees
+#     a guest only on XS_RELEASE) and a later create could fail, so a group of 3 got a boot of its own. Since
+#     then `xaloqi-can-bench` sends XS_RELEASE after each destroy (xaloqi-xs-release): check `xl list` is clean
 #   - `cell` prints the pCPU DomZ-CAN really got and stops if it is not PIN (a tool without
 #     XAQ_DOMZ_CPUS ignores the pin)
 # The workarounds B3 needed (xl rename 1 DomD, ulimit -n, removing a stale xenstored socket) are
