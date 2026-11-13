@@ -75,7 +75,7 @@ What goes into the image, so that nothing is sent to DomD and patched live on th
   - xen-sys: `xen-sys-8a234c94.patch`
   - xen-vhost-frontend: `xen-vhost-frontend-a1e333c5.patch`, then `xen-vhost-frontend-a1e333c5-teardown.patch`
     (the ioreq range is released even if a reset or shutdown panics; a poisoned lock is taken back)
-- EDS v1.28.0 in DomZ-CAN (pinned in `west.yml` and `versions.env`).
+- EDS v1.29.0 in DomZ-CAN (pinned in `west.yml` and `versions.env`).
 
 In DomD, `cat /usr/share/xaloqi-can/zre.rev`, `xl vcpu-list` and the PASS line of `xaloqi-can-bench domz` (it ends
 with the pCPU the guest got) say what the image is and where DomZ-CAN runs. To rehearse every bench cell before the
@@ -104,7 +104,7 @@ use RP1 SPI0 CE0 and GPIO25.
 EDS side: from v1.27.0 an FD-mode EDS sends every frame (SF, FF, CF, FC) as a CAN FD
 frame (EDS#557), which a Linux CAN FD ISO-TP socket accepts; BRS is not set by this
 ECU (see `src/main.c`). Before v1.26.0 the ECU went mute after an unanswered classic
-FF (EDS#541); both bench ECUs now pin v1.28.0.
+FF (EDS#541); both bench ECUs now pin v1.29.0.
 
 ## Results (2026-11-09)
 
