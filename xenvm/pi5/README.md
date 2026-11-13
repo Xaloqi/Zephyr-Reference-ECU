@@ -239,7 +239,7 @@ else uses.
   three guest creates per boot the server's 5 slots (DomD, DomZ and three guests) are used up: later guests run
   without an introduced xenstore connection. `xaloqi-can-bench` and `xaloqi-teardown-loop` now send `XS_RELEASE` after
   every `xl destroy` (`bench/xaloqi-xs-release`; by hand from DomD: `xaloqi-xs-release <domid>`). Upstream report:
-  <!-- AGL issue link: to be added once the issue is posted -->. The images of 2026-11-11 predate this change, so it
+  [sodev-demo-workspace-rpi#9](https://github.com/automotive-grade-linux/sodev-demo-workspace-rpi/issues/9). The images of 2026-11-11 predate this change, so it
   is not measured on the Pi yet. The last domain of a run was only freed after a later release; why is open. A
   create that failed in one B3 group may be the slot limit (not shown). xen-vhost-frontend's threads still panic at
   every create (`src/main.rs:85:56`, `XBInvalidState`) and the guest works.
