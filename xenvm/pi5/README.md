@@ -197,6 +197,9 @@ without flagged samples is the same figure. The FD image's pCPU 3 runs stayed un
 and without the fix), so that penalty is not the reader's CPU use. vhost-device-can's CPU with DomZ-CAN up and the bus idle went from 100 % of one
 vCPU (11-07 image) to 0.01 % with the reader fix in the image (60 s windows; QEMU rehearsal 97.5 % to 0.20 %).
 
+**Open:** why the classic pCPU 3 tail is longer than FD's is not explained. One candidate is the NUCLEO's traffic on the classic bus: the
+FD runs had the NUCLEO transceiver unpowered, so DomD's tool and `candump` handled less traffic. Not tested.
+
 A 10-cycle create/destroy loop (`bench/xaloqi-teardown-loop`, FD image, pCPU 3; the loop now runs `xaloqi-can-bench up` itself,
 the image tested did not and needed `up` first): every destroy returned in 10 to 11 s, no
 `reset()` panic, no `PoisonError`, `XBInvalidState` at `main.rs:85:56` in all ten, and four dying domains at the end (not
