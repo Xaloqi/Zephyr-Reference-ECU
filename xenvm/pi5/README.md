@@ -71,7 +71,7 @@ What goes into the image, so that nothing is sent to DomD and patched live on th
   - vhost-device: `vhost-device-c0bfee92.patch` (#924), then `vhost-device-c0bfee92-reader-poll.patch` (the
     reader change of #1020, backported onto this pin: the reader no longer busy-polls a vCPU; drop on pin bump)
   - vireshk/vhost: `vireshk-vhost-abf24853.patch`, then `vireshk-vhost-abf24853-reset.patch` (`reset()` returns the
-    interrupt of a never-activated device instead of panicking)
+    interrupt of a never-activated device instead of panicking; upstream as [vireshk/vhost#38](https://github.com/vireshk/vhost/pull/38))
   - xen-sys: `xen-sys-8a234c94.patch`
   - xen-vhost-frontend: `xen-vhost-frontend-a1e333c5.patch`, then `xen-vhost-frontend-a1e333c5-teardown.patch`
     (the ioreq range is released even if a reset or shutdown panics; a poisoned lock is taken back)
@@ -174,7 +174,7 @@ EDS#562 download numbers are in that issue.
 ### Results, with the reader fix and the `reset()` fix (2026-11-12)
 
 The images carry a backport of [rust-vmm/vhost-device#1020](https://github.com/rust-vmm/vhost-device/pull/1020) (the reader no longer busy-polls)
-and the `reset()` fix. Same load and method as above; every run printed the pCPU it was asked for, hard affinity the same.
+and the `reset()` fix ([vireshk/vhost#38](https://github.com/vireshk/vhost/pull/38)). Same load and method as above; every run printed the pCPU it was asked for, hard affinity the same.
 Values in ms, three runs each unless stated.
 
 | Cell | Median | p95 | p99 | Max |
