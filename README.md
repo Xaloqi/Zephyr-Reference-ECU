@@ -111,6 +111,10 @@ here:
 | Real CAN/DoIP transport for the TestLab campaign | | `xaloqi-tester-pro` |
 | Ship closed-source firmware built on this | | EDS commercial licence (GPL-2.0 otherwise requires releasing your firmware's source) |
 
+Prices and what each licence contains are public: [EDS Developer and
+Professional](https://xaloqi.com/eds#pricing) ·
+[TestLab Pro (`xaloqi-tester-pro`)](https://xaloqi.com/testlab#pricing).
+
 **Pre-committed generated C.** `generated/*.c|h` is committed to this repo
 so that a forker with no EDS licence can still build and run everything
 above the line. This is the exact mechanism EDS's own public examples use
