@@ -1,0 +1,32 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Xaloqi
+"""xaloqi-xs-release DOMID...: send XS_RELEASE for each domain to the xenstore server, after `xl destroy`.
+
+SoDeV's Zephyr Dom0 xenstore server frees a toolstack-introduced domain only on XS_RELEASE, which
+`xl destroy` never sends: without it the domain stays `(null) --p--d` in `xl list` and one of the
+server's CONFIG_DOMU_MAX (5) slots is lost. Stock xenstored releases a dying domain itself, and
+answers an error (the domain is already gone): that and every other failure is printed and ignored,
+so the bench tools can call this on any xenstore server. Always exits 0. Socket: $XENSTORED_PATH or
+/var/run/xenstored/socket."""
+import os, socket, struct, sys
+
+XS_RELEASE, XS_ERROR = 9, 16
+
+
+def release(domid):
+    s = socket.socket(socket.AF_UNIX)
+    s.settimeout(5)
+    s.connect(os.environ.get("XENSTORED_PATH", "/var/run/xenstored/socket"))
+    p = (str(domid) + "\0").encode()
+    s.send(struct.pack("<IIII", XS_RELEASE, 1, 0, len(p)) + p)
+    t, _, _, n = struct.unpack("<IIII", s.recv(16))
+    return t, s.recv(n).rstrip(b"\0").decode()
+
+
+for d in sys.argv[1:]:
+    try:
+        t, r = release(d)
+        print("xs-release dom%s: %s" % (d, "error " + r if t == XS_ERROR else r))
+    except (OSError, struct.error, ValueError) as e:
+        print("xs-release dom%s: not sent (%s)" % (d, e))

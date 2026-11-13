@@ -17,7 +17,7 @@ LIB=/usr/libexec/xaloqi-can
 mkdir -p $LIB /usr/lib/xen/boot /etc/xen
 cp isotp_probe.py can_dump.py xs-sock-relay.py uds_timing.py isotp_burst.py $LIB/
 cp vhost-device-can vhost-device-rng xen-vhost-frontend /usr/local/bin/
-cp xaloqi-can-bench xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu xaloqi-teardown-loop /usr/local/bin/
+cp xaloqi-can-bench xaloqi-domd-load xaloqi-b3-group xaloqi-proc-cpu xaloqi-teardown-loop xaloqi-xs-release /usr/local/bin/
 chmod 755 /usr/local/bin/xaloqi-*
 cp zephyr-domz.bin /usr/lib/xen/boot/zephyr-domz-can.bin
 cp domz.cfg /etc/xen/domz.cfg
@@ -41,7 +41,7 @@ os.execv("/usr/bin/python3", ["python3", "/usr/libexec/xaloqi-can/can_dump.py", 
 STUB
 chmod 755 /usr/local/bin/candump
 echo "=== IMAGE: sha256 of the tools as installed"
-sha256sum /usr/local/bin/xaloqi-can-bench /usr/local/bin/xaloqi-domd-load /usr/local/bin/xaloqi-b3-group /usr/local/bin/xaloqi-proc-cpu /usr/local/bin/xaloqi-teardown-loop | cut -c1-16,65-
+sha256sum /usr/local/bin/xaloqi-can-bench /usr/local/bin/xaloqi-domd-load /usr/local/bin/xaloqi-b3-group /usr/local/bin/xaloqi-proc-cpu /usr/local/bin/xaloqi-teardown-loop /usr/local/bin/xaloqi-xs-release | cut -c1-16,65-
 echo "domain 1 is named: $(xenstore-read /local/domain/1/name); DomD vCPUs: $(grep -c '^processor' /proc/cpuinfo); FD=${XAQ_CAN_FD}"
 
 B up

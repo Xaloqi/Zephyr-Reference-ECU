@@ -36,7 +36,7 @@ loopback without ever touching the bus.
 | `meta-xaloqi-virtio-can/` | Yocto layer for SoDeV's DomD build (wrynose): recipes for vhost-device (can, rng) and xen-vhost-frontend, the CAN HAT in DomD's partial device tree, the kernel options, and the DomZ-CAN package |
 | `sodev-add.sh` | Copies the layer into a SoDeV workspace (with `../patches/` and the DomZ-CAN image) and adds it to the DomD component of `rpi5-sodev.yaml` |
 | `rehearse.sh`, `rehearse/` | Runs the bench driver end to end under QEMU, before the board exists |
-| `bench/` | Host and DomD tools for the bench sessions: `xaloqi-domd-load` (the DomD load for P2 cells C/D: start, check, stop, `cell`), `xaloqi-b3-group` (a group of loaded cells from a fresh boot), `xaloqi-proc-cpu` (CPU time of a process over a window), `xaloqi-teardown-loop` (N create/destroy cycles of DomZ-CAN and what each leaves behind), `console-send.py` (a file to DomD over the Xen console as base64 with a sha256 check) |
+| `bench/` | Host and DomD tools for the bench sessions: `xaloqi-domd-load` (the DomD load for P2 cells C/D: start, check, stop, `cell`), `xaloqi-b3-group` (a group of loaded cells from a fresh boot), `xaloqi-proc-cpu` (CPU time of a process over a window), `xaloqi-teardown-loop` (N create/destroy cycles of DomZ-CAN and what each leaves behind), `xaloqi-xs-release` (XS_RELEASE to the xenstore server after a destroy), `console-send.py` (a file to DomD over the Xen console as base64 with a sha256 check) |
 | `rehearse-b3.sh`, `rehearse/domd-load-rehearse.sh`, `rehearse/domd-teardown.sh` | DomD scripts for the same QEMU harness: the load tool end to end with P2 (`rehearse-b3.sh <build> load`), and a create/destroy loop of DomZ-CAN that records xen-vhost-frontend's output and Xen's view of the domain (`rehearse-b3.sh <build> teardown`) |
 | `rehearse-b3.sh <build> b4\|reset\|idle`, `rehearse/domd-b4-rehearse.sh`, `rehearse/domd-reset-proof.sh`, `rehearse/domd-idle-compare.sh` | The B4 rehearsals under QEMU: every bench cell with the baked-in tools (placement printed, the pin check stopped on purpose), N paused-then-destroyed DomZ-CAN cases for the `reset()` fix, and vhost-device-can's idle CPU before and after the reader-poll patch |
 | `scripts/gen-crates-inc.py` | Regenerates the recipes' crate lists from a (patched) `Cargo.lock` |
@@ -64,7 +64,7 @@ against these sources.
 
 What goes into the image, so that nothing is sent to DomD and patched live on the Pi:
 
-- `xaloqi-can-bench`, `xaloqi-domd-load`, `xaloqi-b3-group`, `xaloqi-proc-cpu` and `xaloqi-teardown-loop` in `/usr/bin`, the relay
+- `xaloqi-can-bench`, `xaloqi-domd-load`, `xaloqi-b3-group`, `xaloqi-proc-cpu`, `xaloqi-teardown-loop` and `xaloqi-xs-release` in `/usr/bin`, the relay
   (`/usr/libexec/xaloqi-can/xs-sock-relay.py`, with the fd fix of #64), and `/usr/share/xaloqi-can/zre.rev`,
   the commit the layer was copied from (`dirty=0` if the tree was clean).
 - The backends, from `xenvm/patches/`, applied in this order per repository:
@@ -232,12 +232,17 @@ else uses.
 
 ### Known issues
 
-- A destroyed DomZ-CAN domain stays "dying" (usually one per create/destroy cycle from a boot's second create; in a 10-cycle
-  loop on the FD image only some were left, see above). It still happens with the `reset()` fix. Killing the stale `xl create -p` or `xen-vhost-frontend` does not free it (it does under QEMU).
-  xen-vhost-frontend's threads panic at every create (`src/main.rs:85:56`, `XBInvalidState`) and the
-  guest still works; a later create can fail (`PoisonError` in the frontend; twice, on the FD image's
-  pCPU 0 runs, while three creates in a row also worked elsewhere). So run one group of loaded cells per
-  boot (`bench/xaloqi-b3-group`).
+- A destroyed DomZ-CAN domain used to stay "dying" (`(null) --p--d` in `xl list`, one page held). The cause is the
+  Dom0 xenstore server of SoDeV's patch stack (a Zephyr Dom0 serving xenstore): it introduces every guest that DomD's
+  `xl create` makes and frees it only on an `XS_RELEASE` request. `xl destroy` never sends one (libxl does only on a
+  soft reset; stock xenstored uses `VIRQ_DOM_EXC` instead), so the domain stays held until it is released, and after
+  three guest creates per boot the server's 5 slots (DomD, DomZ and three guests) are used up: later guests run
+  without an introduced xenstore connection. `xaloqi-can-bench` and `xaloqi-teardown-loop` now send `XS_RELEASE` after
+  every `xl destroy` (`bench/xaloqi-xs-release`; by hand from DomD: `xaloqi-xs-release <domid>`). Upstream report:
+  <!-- AGL issue link: to be added once the issue is posted -->. The images of 2026-11-11 predate this change, so it
+  is not measured on the Pi yet. The last domain of a run was only freed after a later release; why is open. A
+  create that failed in one B3 group may be the slot limit (not shown). xen-vhost-frontend's threads still panic at
+  every create (`src/main.rs:85:56`, `XBInvalidState`) and the guest works.
 - `xs-sock-relay.py` leaks a xenbus fd per client and dies at 1,024 fds, after which every `xl create`
   fails ([#63](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/63)).
 - DomD's `flat L2 bridge activation` unit fails at boot (SoDeV's networking). It does not

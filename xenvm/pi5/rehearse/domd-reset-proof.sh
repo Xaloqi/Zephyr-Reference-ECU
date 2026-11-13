@@ -12,8 +12,8 @@ cd /root
 LIB=/usr/libexec/xaloqi-can
 mkdir -p $LIB /usr/lib/xen/boot /etc/xen
 cp isotp_probe.py can_dump.py xs-sock-relay.py uds_timing.py isotp_burst.py $LIB/
-cp vhost-device-can vhost-device-rng xen-vhost-frontend xaloqi-can-bench /usr/local/bin/
-chmod 755 /usr/local/bin/xaloqi-can-bench
+cp vhost-device-can vhost-device-rng xen-vhost-frontend xaloqi-can-bench xaloqi-xs-release /usr/local/bin/
+chmod 755 /usr/local/bin/xaloqi-can-bench /usr/local/bin/xaloqi-xs-release
 cp zephyr-domz.bin /usr/lib/xen/boot/zephyr-domz-can.bin
 cp domz.cfg /etc/xen/domz.cfg
 xenstore-write /local/pool/0/name Pool-0 /tool/xenconsoled/domid 1 \
