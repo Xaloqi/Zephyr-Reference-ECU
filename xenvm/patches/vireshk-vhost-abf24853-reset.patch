@@ -9,8 +9,8 @@ XenDevice::exit() with the FrontendGuests lock held, so the lock is poisoned and
 ioreq server and foreign mappings of the guest are never released: the domain stays
 `(null) --p--d`. The field is already an Option, so `take()` is the return value.
 
-Upstream: not opened (draft in xaloqi-knowledge campaigns/2026-11-10-xvf-teardown-issue-draft.md,
-issue A); target vireshk/vhost, branch frontend/stable.
+Upstream: https://github.com/vireshk/vhost/pull/38 (frontend/stable). Drop this patch
+once it is merged and the pin moves past it.
 
 diff --git a/crates/vhost-user-frontend/src/device.rs b/crates/vhost-user-frontend/src/device.rs
 index 349ad0f..e6b5ea6 100644
