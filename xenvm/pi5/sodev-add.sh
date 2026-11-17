@@ -23,7 +23,7 @@ XENVM=$(cd "$HERE/.." && pwd)
 WS=$(cd "${1:?usage: $0 <sodev-workspace> <xenvm-build-dir>}" && pwd -P)
 XB=$(cd "${2:?usage: $0 <sodev-workspace> <xenvm-build-dir>}" && pwd)
 # The SoDeV commit this was built and checked against.
-SODEV_REV=dc2755f603feb6166b489e2c3cc18eedf8e8f279
+SODEV_REV=fb1ba4af11c2aeeff8332ebeea87f4c4b98b340e
 
 [ -f "$WS/rpi5-sodev.yaml" ] && [ -x "$WS/build.sh" ] || { echo "$WS is not a sodev-demo-workspace-rpi checkout" >&2; exit 1; }
 HEAD=$(git -C "$WS" rev-parse HEAD)

@@ -113,6 +113,9 @@ nucleo() {
   pass "NUCLEO (ECU 0) answered 3E/10 03/22 F190/27 01 x2 over the physical bus ($L)"
 }
 
+# XAQ_XS_RELEASE=0 turns the release off (xaloqi-xs-release then sends nothing); the PASS line of `domz` says which.
+xsr_state() { [ "${XAQ_XS_RELEASE:-1}" = 0 ] && echo "off (XAQ_XS_RELEASE=0)" || echo on; }
+
 # Destroy DomZ-CAN, then send XS_RELEASE for its domid. Stock xenstored frees a dying domain itself
 # (VIRQ_DOM_EXC); SoDeV's Zephyr Dom0 xenstore server only on XS_RELEASE, which `xl destroy` never
 # sends, so without it the domain stays dying and one of the server's 5 slots is lost. Best effort.
@@ -221,7 +224,7 @@ domz() {
   grep -q 'WIRE can1 7E9 ' "$L.wire" || fail "no 0x7E9 frame on $TESTER: the answer did not cross the bus"
   # Where the guest really runs: XAQ_DOMZ_CPUS is silently ignored by a tool that predates it.
   W=$(set -- $(xl vcpu-list $NAME | tail -n 1); echo "pCPU $4, hard affinity $7")
-  pass "$NAME (ECU 1) answered over virtio-can (backend on $bus) and the physical bus ($L); vCPU on $W"
+  pass "$NAME (ECU 1) answered over virtio-can (backend on $bus) and the physical bus ($L); vCPU on $W; XS_RELEASE $(xsr_state)"
 }
 
 canary() {
