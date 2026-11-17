@@ -27,6 +27,7 @@ xenstore-write /local/pool/0/name Pool-0 /tool/xenconsoled/domid 1 \
 XENCONSOLED_TRACE=guest /usr/sbin/xenconsoled --pid-file=/run/xenconsoled.pid \
   --log=guest --log-dir=/var/log/xen/console
 FD=; BOOTS=0; [ -f can.env ] && . ./can.env
+[ -f xsr.env ] && . ./xsr.env; echo "XAQ_XS_RELEASE=${XAQ_XS_RELEASE:-unset (on)}"
 for v in can0 can1; do ip link add dev $v type vcan; done
 export XAQ_VIRTUAL=1 XAQ_BACKEND_TYPE= XAQ_LOGDIR=/root/log XAQ_P2_MAX_MS=1000
 export XAQ_CAN_FD=${FD:-0}

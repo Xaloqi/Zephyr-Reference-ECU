@@ -14,6 +14,8 @@
 #   rehearse-b3.sh <xenvm-build-dir> reset [N]   N (default 6) paused-then-destroyed DomZ-CAN cases: frontend
 #                                                panics and dying domains per case (the reset() fix, issue A)
 #   XENVM_DOMD_WAIT=<seconds> raises DomD's 900 s cap (b4 needs about 2400).
+#   XENVM_XS_RELEASE=0 runs DomD's bench tools with XAQ_XS_RELEASE=0 (no XS_RELEASE after a destroy); b4, reset and
+#                                                teardown say which. Stock xenstored frees a dying domain itself, so 0 dying either way.
 #   BEFORE_BIN=<old vhost-device-can> rehearse-b3.sh <xenvm-build-dir> idle [SECS]
 #                                                vhost-device-can CPU with an idle bus, before and after the
 #                                                reader-poll patch (default 80 s each)
@@ -31,6 +33,10 @@ XENVM_CAN_FD=; grep -q ' fd=1 ' "$BUILD/out/zephyr-domz-can.stamp" 2>/dev/null &
 F=/src/xenvm/pi5/meta-xaloqi-virtio-can/recipes-guests/xaloqi-domz-can/files
 R=/src/xenvm/pi5/rehearse
 EXTRA="$R/can_bridge.py $F/uds_timing.py $F/isotp_burst.py $F/xaloqi-can-bench"
+# XAQ_XS_RELEASE for the bench tools in DomD: a file the DomD scripts source (unset = the tools' default, on).
+mkdir -p "$BUILD/extra"
+case "${XENVM_XS_RELEASE:-}" in 0) echo "export XAQ_XS_RELEASE=0" ;; ""|1) echo ": release on" ;; *) echo "XENVM_XS_RELEASE is 0 or 1" >&2; exit 2 ;; esac > "$BUILD/extra/xsr.env"
+EXTRA="$EXTRA /build/extra/xsr.env"
 case $MODE in
   load)
     # The file as the console delivers it: base64 and a sha256, checked in DomD.
