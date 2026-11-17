@@ -54,17 +54,30 @@ You need Docker. The SoDeV build is theirs; this adds one layer to its DomD.
 XENVM_BUILD_DIR=$PWD/xenvm/build-ecu1 XENVM_CAN_ECU_INDEX=1 xenvm/run.sh can   # must PASS
 # 2. SoDeV's workspace, plus this layer
 git clone https://github.com/automotive-grade-linux/sodev-demo-workspace-rpi sodev
-git -C sodev checkout dc2755f603feb6166b489e2c3cc18eedf8e8f279
+git -C sodev checkout 382212c60e237db4f5b65e760849176e1853f080   # main after PRs #10-#12 (2026-11-17)
 xenvm/pi5/sodev-add.sh sodev xenvm/build-ecu1
-(cd sodev && ./build.sh -z --ram=8g)
+(cd sodev && ./build.sh -z --ram=8g --rebuild-images)
 ```
+
+The SoDeV commit is `382212c6`: main after #10 and #11 (Zephyr 4.5.0 Dom0, review fixes) and #12 (its patches 0035-0038 make the
+Dom0 xenstore server release a destroyed guest itself, sodev-demo-workspace-rpi#9). The last image built on `dc2755f6` is the B4 one.
+`--rebuild-images` matters when you had built an older SoDeV: its builder image has CMake 3.22 and the Zephyr 4.5.0 Dom0 needs 3.28
+(`CMake 3.28.0 or higher is required` in the first Dom0 step). Keep the build dir of `xenvm/run.sh can` outside the repository,
+or `zre.rev` says `dirty=1`.
+
+DomZ-CAN stays on Zephyr 4.4.1 (`xenvm/west.yml`), as in B3 and B4, although the Dom0 is on 4.5.0 now: they are separate guests. A
+Zephyr 4.5.0 build of DomZ-CAN (tried 2026-11-17, `ZEPHYR_REV=41d10b59`) stops at `xen/public/hvm/dm_op.h: No such file`:
+4.5 removed `include/zephyr/xen/public`, and its Xen headers come from the `zephyr-xenlib` module, which our `west.yml` does not
+have. The port is not done.
 
 `sodev-add.sh` refuses a DomZ image that was not built as ECU 1, or that is stale
 against these sources.
 
 What goes into the image, so that nothing is sent to DomD and patched live on the Pi:
 
-- `xaloqi-can-bench`, `xaloqi-domd-load`, `xaloqi-b3-group`, `xaloqi-proc-cpu`, `xaloqi-teardown-loop` and `xaloqi-xs-release` in `/usr/bin`, the relay
+- `xaloqi-can-bench`, `xaloqi-domd-load`, `xaloqi-b3-group`, `xaloqi-proc-cpu`, `xaloqi-teardown-loop` and `xaloqi-xs-release` in `/usr/bin`
+  (`XAQ_XS_RELEASE=0` turns the `XS_RELEASE` after a destroy off; the `domz` PASS line, the group header and the teardown loop's header,
+  RESULT and SUMMARY lines say `off (XAQ_XS_RELEASE=0)` or `on`), the relay
   (`/usr/libexec/xaloqi-can/xs-sock-relay.py`, with the fd fix of #64), and `/usr/share/xaloqi-can/zre.rev`,
   the commit the layer was copied from (`dirty=0` if the tree was clean).
 - The backends, from `xenvm/patches/`, applied in this order per repository:
@@ -232,17 +245,15 @@ else uses.
 
 ### Known issues
 
-- A destroyed DomZ-CAN domain used to stay "dying" (`(null) --p--d` in `xl list`, one page held). The cause is the
-  Dom0 xenstore server of SoDeV's patch stack (a Zephyr Dom0 serving xenstore): it introduces every guest that DomD's
-  `xl create` makes and frees it only on an `XS_RELEASE` request. `xl destroy` never sends one (libxl does only on a
-  soft reset; stock xenstored uses `VIRQ_DOM_EXC` instead), so the domain stays held until it is released, and after
-  three guest creates per boot the server's 5 slots (DomD, DomZ and three guests) are used up: later guests run
-  without an introduced xenstore connection. `xaloqi-can-bench` and `xaloqi-teardown-loop` now send `XS_RELEASE` after
-  every `xl destroy` (`bench/xaloqi-xs-release`; by hand from DomD: `xaloqi-xs-release <domid>`). Upstream report:
-  [sodev-demo-workspace-rpi#9](https://github.com/automotive-grade-linux/sodev-demo-workspace-rpi/issues/9). The images of 2026-11-11 predate this change, so it
-  is not measured on the Pi yet. The last domain of a run was only freed after a later release; why is open. A
-  create that failed in one B3 group may be the slot limit (not shown). xen-vhost-frontend's threads still panic at
-  every create (`src/main.rs:85:56`, `XBInvalidState`) and the guest works.
+- A destroyed DomZ-CAN domain used to stay "dying" (`(null) --p--d` in `xl list`, one page held) on SoDeV's Zephyr Dom0 until
+  `sodev-demo-workspace-rpi` PR #12 (`382212c6`, 2026-11-17): the server's xenstore ring page was released only on an `XS_RELEASE`
+  request, `xl destroy` never sends one (libxl does only on a soft reset), and after three guest creates per boot its 5 slots (DomD,
+  DomZ and three guests) were used up. Their patch 0035 binds `VIRQ_DOM_EXC` and releases a dead toolstack domain itself, as stock
+  xenstored does; a second release is a no-op. Report: [sodev-demo-workspace-rpi#9](https://github.com/automotive-grade-linux/sodev-demo-workspace-rpi/issues/9)
+  (closed by the fix). **Not measured on the Pi yet.** Our `xaloqi-xs-release` step stays, for images on an older SoDeV base; on the
+  fixed server it finds the domain released and is harmless (the reply should be `OK`, read from their patch, to be confirmed on the
+  bench). `XAQ_XS_RELEASE=0` runs the bench tools without it, to test their fix alone. The B4 record has the evidence for the old behaviour.
+  xen-vhost-frontend's threads still panic at every create (`src/main.rs:85:56`, `XBInvalidState`) and the guest works.
 - `xs-sock-relay.py` leaks a xenbus fd per client and dies at 1,024 fds, after which every `xl create`
   fails ([#63](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/63)).
 - DomD's `flat L2 bridge activation` unit fails at boot (SoDeV's networking). It does not
@@ -271,6 +282,10 @@ This boots the QEMU harness of `run.sh can` and runs, in its DomD, the same
 - xl is upstream, which has no `backend_type` key.
 
 Its timing is TCG on a PC. It shows that the measurement runs, not what a Pi 5 measures.
+
+`rehearse-b3.sh <build> b4 group|reset` run the later bench steps the same way; `XENVM_XS_RELEASE=0` runs DomD's tools
+without the `XS_RELEASE` after a destroy. The harness's stock `xenstored` frees a dying domain itself, so the release finds nothing
+to do (`xs_release=error ENOENT`) and there are 0 dying domains either way: that checks the switch and the tools, not the Zephyr server.
 
 ## Differences from SoDeV's image, and why
 
