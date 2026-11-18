@@ -8,7 +8,10 @@ SoDeV's Zephyr Dom0 xenstore server frees a toolstack-introduced domain only on 
 server's CONFIG_DOMU_MAX (5) slots is lost. Stock xenstored releases a dying domain itself, and
 answers an error (the domain is already gone): that and every other failure is printed and ignored,
 so the bench tools can call this on any xenstore server. Always exits 0. Socket: $XENSTORED_PATH or
-/var/run/xenstored/socket."""
+/var/run/xenstored/socket.
+
+XAQ_XS_RELEASE=0 sends nothing and says so ("off"), for showing what a destroy leaves behind without the
+release (sodev-demo-workspace-rpi#9) and then with it, on one boot each. Any other value, or unset, sends."""
 import os, socket, struct, sys
 
 XS_RELEASE, XS_ERROR = 9, 16
@@ -25,6 +28,9 @@ def release(domid):
 
 
 for d in sys.argv[1:]:
+    if os.environ.get("XAQ_XS_RELEASE") == "0":
+        print("xs-release dom%s: off (XAQ_XS_RELEASE=0)" % d)
+        continue
     try:
         t, r = release(d)
         print("xs-release dom%s: %s" % (d, "error " + r if t == XS_ERROR else r))

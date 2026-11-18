@@ -12,6 +12,8 @@
 # FAIL of `domz` (a DomZ-CAN that does not answer). Ends with one SUMMARY line.
 # Each `xl destroy` is followed by XS_RELEASE (xaloqi-xs-release), which SoDeV's Zephyr Dom0 xenstore server
 # needs to free the domain; the RESULT line shows the reply (OK, error <errno> on a stock xenstored, none).
+# XAQ_XS_RELEASE=0 sends no release (the RESULT lines then say xs_release=off ...): what the Dom0 server does with no
+# release on this image, for one boot, and the same loop with the release on for the next (sodev-demo-workspace-rpi#9).
 # B3 (before the reset() fix): one dying domain per create from the second cycle on, main.rs:85:56 in every one.
 set -u
 N=${1:-10}; PIN=${XAQ_DOMZ_CPUS:-3}
@@ -24,9 +26,10 @@ if [ "${XAQ_LOOP_UP:-1}" = 1 ]; then
   u=$(sh "$B" up 2>&1 | tail -n 1)
   case $u in PASS*) ;; *) echo "FAIL: xaloqi-can-bench up did not bring the bus up: $u"; exit 1 ;; esac
 fi
+xsr=on; [ "${XAQ_XS_RELEASE:-1}" = 0 ] && xsr="off (XAQ_XS_RELEASE=0)"
 dying() { xl list | grep -c '(null)'; }
 cnt() { grep -c "$1" "$2" 2>/dev/null; }
-d_start=$(dying); echo "== teardown loop: $N cycles, DomZ-CAN on pCPU $PIN, $d_start dying domain(s) before"
+d_start=$(dying); echo "== teardown loop: $N cycles, DomZ-CAN on pCPU $PIN, XS_RELEASE $xsr, $d_start dying domain(s) before"
 c85=0; cres=0; cpois=0; cdie=0; slow=0; n=1
 while [ "$n" -le "$N" ]; do
   d0=$(dying)
@@ -47,5 +50,5 @@ while [ "$n" -le "$N" ]; do
   [ "$new" -gt 0 ] && cdie=$((cdie + 1)); [ "$rc" -ne 0 ] && slow=$((slow + 1))
   n=$((n + 1))
 done
-echo "SUMMARY teardown: $((n - 1)) of $N cycles, dying domains now $(dying) (before: $d_start), cycles with a dying domain $cdie, XBInvalidState $c85, reset() panic $cres, PoisonError $cpois, destroys that failed or timed out $slow"
+echo "SUMMARY teardown: $((n - 1)) of $N cycles, XS_RELEASE $xsr, dying domains now $(dying) (before: $d_start), cycles with a dying domain $cdie, XBInvalidState $c85, reset() panic $cres, PoisonError $cpois, destroys that failed or timed out $slow"
 echo "frontend logs: $K/xvf-<n>.log"

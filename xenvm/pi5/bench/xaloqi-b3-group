@@ -21,6 +21,7 @@ B=$(command -v xaloqi-can-bench) || { echo "FAIL: xaloqi-can-bench not found"; e
 L=${XAQ_LOAD_TOOL:-$(dirname "$0")/xaloqi-domd-load}
 # XAQ_GROUP_UP=0: the bus is already up (the QEMU rehearsal's stand-ins would be orphaned by a second `up`)
 if [ "${XAQ_GROUP_UP:-1}" = 1 ]; then echo "== up $(date +%T)"; sh "$B" up 2>&1 | tail -n 1; fi
+echo "== XS_RELEASE $([ "${XAQ_XS_RELEASE:-1}" = 0 ] && echo "off (XAQ_XS_RELEASE=0)" || echo on)"
 xl list
 run=1
 while [ "$run" -le "$RUNS" ]; do

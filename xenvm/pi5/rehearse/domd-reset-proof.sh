@@ -22,6 +22,7 @@ xenstore-write /local/pool/0/name Pool-0 /tool/xenconsoled/domid 1 \
 XENCONSOLED_TRACE=guest /usr/sbin/xenconsoled --pid-file=/run/xenconsoled.pid \
   --log=guest --log-dir=/var/log/xen/console
 BOOTS=6; [ -f can.env ] && . ./can.env; N=$BOOTS
+[ -f xsr.env ] && . ./xsr.env; echo "XAQ_XS_RELEASE=${XAQ_XS_RELEASE:-unset (on)}"
 for v in can0 can1; do ip link add dev $v type vcan; done
 export XAQ_VIRTUAL=1 XAQ_BACKEND_TYPE= XAQ_LOGDIR=/root/log XAQ_P2_MAX_MS=1000 XAQ_CAN_FD=0
 B() { busybox sh /usr/local/bin/xaloqi-can-bench "$@" 2>&1; }
@@ -50,11 +51,12 @@ for n in $(seq 1 $N); do
   ID=$(xl domid DomZ-CAN); wait_dev "$ID"
   sleep 3
   t0=$(date +%s); timeout 90 xl destroy DomZ-CAN > /root/xld.out 2>&1; rc=$?
+  rel=$(xaloqi-xs-release "$ID" 2>&1 | tail -n 1 | sed 's/^xs-release dom[0-9]*: //')   # as the bench tools do after a destroy
   sleep 3
   panics=$(grep -c 'panicked' $R/xvf.log); rp=$(grep -c 'vhost-user-frontend.*reset\|generic.rs\|device.rs' $R/xvf.log)
   pz=$(grep -c PoisonError $R/xvf.log)
   dying=$(( $(xl list | grep -c '(null)') - d0 ))   # new dying domains from this case
-  echo "RESULT paused $n: destroy rc=$rc in $(( $(date +%s) - t0 )) s, frontend panics=$panics, in reset()=$rp, PoisonError=$pz, new dying domains=$dying"
+  echo "RESULT paused $n: destroy rc=$rc in $(( $(date +%s) - t0 )) s, xs_release=$rel, frontend panics=$panics, in reset()=$rp, PoisonError=$pz, new dying domains=$dying"
   grep -a 'panicked' -A1 $R/xvf.log | head -n 4
   [ "$panics" -gt 0 ] && bad=$((bad + 1))
   [ "$dying" -gt 0 ] && dyingruns=$((dyingruns + 1))
