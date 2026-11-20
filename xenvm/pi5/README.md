@@ -210,13 +210,45 @@ without flagged samples is the same figure. The FD image's pCPU 3 runs stayed un
 and without the fix), so that penalty is not the reader's CPU use. vhost-device-can's CPU with DomZ-CAN up and the bus idle went from 100 % of one
 vCPU (11-07 image) to 0.01 % with the reader fix in the image (60 s windows; QEMU rehearsal 97.5 % to 0.20 %).
 
-**Open:** why the classic pCPU 3 tail is longer than FD's is not explained. One candidate is the NUCLEO's traffic on the classic bus: the
-FD runs had the NUCLEO transceiver unpowered, so DomD's tool and `candump` handled less traffic. Not tested.
+The 2026-11-18 runs below follow this up: the classic tail is not the NUCLEO's traffic, and this comparison was not like for like (the
+classic runs were measured later into the load), but FD stays clean when measured at the same time, so the difference is real.
 
 A 10-cycle create/destroy loop (`bench/xaloqi-teardown-loop`, FD image, pCPU 3; the loop now runs `xaloqi-can-bench up` itself,
 the image tested did not and needed `up` first): every destroy returned in 10 to 11 s, no
 `reset()` panic, no `PoisonError`, `XBInvalidState` at `main.rs:85:56` in all ten, and four dying domains at the end (not
 one per create).
+
+### Results on SoDeV main `382212c6` (2026-11-18)
+
+Classic image of ZRE `9b5f413` on `sodev-demo-workspace-rpi` `382212c6` (Dom0 on Zephyr 4.5.0; DomZ-CAN still on Zephyr 4.4.1). This SoDeV base
+pins DomD's vCPU 0 to pCPU 0 and vCPU 1 to pCPU 1; pCPU 3 stays free. Same load and method as above, every run on the pCPU asked for,
+all requests answered, `echo_late=0` in every row. Values in ms.
+
+| Cell | Runs | Median | p95 | p99 | Max |
+|---|---|---|---|---|---|
+| NUCLEO, DomD idle | 1 | 0.397 | 0.410 | 0.414 | 0.746 |
+| DomZ-CAN pCPU 3, DomD idle | 1 | 0.561 | 1.434 | 1.461 | 1.668 |
+| DomZ-CAN pCPU 3, loaded, NUCLEO measured first (D at 22-44 s into the load) | 3 | 0.524 / 1.249 / 0.522 | 2.02 / 4.42 / 1.67 | 5.14 / 15.34 / 3.95 | 7.85 / 24.01 / 12.80 |
+| DomZ-CAN pCPU 3, loaded, NUCLEO unpowered (D at 0-21 s) | 3 | 0.489 / 0.622 / 1.213 | 1.67 / 2.22 / 1.93 | 4.80 / 4.55 / 4.90 | 6.42 / 6.19 / 6.25 |
+| same, D started 22 s into the load | 3 | 0.553 / 0.534 / 1.115 | 4.52 / 1.65 / 10.40 | 16.15 / 4.74 / 24.22 | 37.58 / 6.71 / 35.48 |
+| DomZ-CAN pCPU 0, loaded | 1 | 19.402 | 28.47 | 30.51 | 48.89 |
+| FD: DomZ-CAN pCPU 3, DomD idle | 1 | 1.507 | 1.52 | 1.55 | 1.78 |
+| FD: pCPU 3, loaded, D at 0-22 s | 3 | 1.520 / 1.513 / 1.514 | 2.47 / 3.47 / 2.29 | 5.47 / 5.52 / 4.52 | 5.59 / 8.63 / 5.71 |
+| FD: pCPU 3, loaded, D started 22 s into the load | 3 | 1.527 / 1.510 / 1.502 | 2.51 / 1.74 / 1.72 | 5.43 / 3.67 / 4.44 | 8.26 / 5.54 / 9.48 |
+
+The NUCLEO sends nothing unsolicited, and the tool measures it (cell C) before DomZ-CAN (cell D), so it is never on the bus while D runs.
+The classic pCPU 3 tail follows the time since DomD's load started: **no classic run measured in the first 22 s of the load had a sample
+over 10 ms (0 of 3), while 4 of 6 measured at 22-44 s did, all of those samples 30-44 s in.** Two of the three delayed classic runs missed
+25 ms, as two of three classic runs did on 2026-11-12. Temperature alone does not explain it (a clean delayed run was as hot). **The FD image
+(Waveshare 2-CH CAN FD HAT, NUCLEO unplugged) shows no such tail at either start time** (0 of 3 runs in the 22-44 s window, and 0 of 6 at 0-22 s
+counting 2026-11-12), so the tail looks specific to the classic setup. Three FD runs in the late window is a small sample, and the FD runs
+ran a few degrees cooler. What degrades the classic path around 30 s is not known. The pCPU 0 row is one run on the new pinning, so it is
+not a like-for-like comparison with 2026-11-12. The FD image also boots on this SoDeV base (both MCP2518FD probed, 500 k / data 2 M).
+
+Dying domains, the same image, `bench/xaloqi-teardown-loop 10`, one fresh boot each: with `XAQ_XS_RELEASE=0`, 10 of 10 cycles left no dying
+domain (Dom0 logs `xs_release:domid:N released (dead)` for each), the 4th and later creates were introduced, and the last domain was freed;
+with the release step on, the same, and every `XS_RELEASE` was answered `OK`. The FD image, 3 cycles with `XAQ_XS_RELEASE=0`: the same.
+`XBInvalidState` at `main.rs:85` is unchanged (2 per create).
 
 ### Pinning DomZ-CAN
 
@@ -250,9 +282,9 @@ else uses.
   request, `xl destroy` never sends one (libxl does only on a soft reset), and after three guest creates per boot its 5 slots (DomD,
   DomZ and three guests) were used up. Their patch 0035 binds `VIRQ_DOM_EXC` and releases a dead toolstack domain itself, as stock
   xenstored does; a second release is a no-op. Report: [sodev-demo-workspace-rpi#9](https://github.com/automotive-grade-linux/sodev-demo-workspace-rpi/issues/9)
-  (closed by the fix). **Not measured on the Pi yet.** Our `xaloqi-xs-release` step stays, for images on an older SoDeV base; on the
-  fixed server it finds the domain released and is harmless (the reply should be `OK`, read from their patch, to be confirmed on the
-  bench). `XAQ_XS_RELEASE=0` runs the bench tools without it, to test their fix alone. The B4 record has the evidence for the old behaviour.
+  (closed by the fix). **Fixed upstream in SoDeV PR #12 (`382212c6`), verified on the Pi on 2026-11-18** (results above: 10 of 10 cycles
+  freed with our step off, the 4th create and the last domain included). The `xaloqi-xs-release` step is only needed on older SoDeV bases;
+  on the fixed server it is answered `OK` and changes nothing. `XAQ_XS_RELEASE=0` runs the bench tools without it.
   xen-vhost-frontend's threads still panic at every create (`src/main.rs:85:56`, `XBInvalidState`) and the guest works.
 - `xs-sock-relay.py` leaks a xenbus fd per client and dies at 1,024 fds, after which every `xl create`
   fails ([#63](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/63)).
