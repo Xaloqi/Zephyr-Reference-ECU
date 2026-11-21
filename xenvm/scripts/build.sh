@@ -126,7 +126,7 @@ if [ ! -f $B/rootfs/.done ]; then
   touch $B/rootfs/.done
 fi
 
-# --- West workspace from xenvm/west.yml (Zephyr v4.4.1, EDS, virtio-can) -------
+# --- West workspace from xenvm/west.yml (Zephyr v4.5.0, xenlib, EDS, virtio-can) -
 west_ws() {
   WS=$B/ws
   if [ -d $WS/.west ] && ! cmp -s /src/xenvm/west.yml $WS/manifest/west.yml; then
@@ -141,6 +141,8 @@ west_ws() {
     (cd $WS && west init -l manifest && west update --narrow -o=--depth=1) > $B/log-west.txt 2>&1
   fi
   [ "$(git -C $WS/zephyr rev-parse HEAD)" = "$ZEPHYR_REV" ] || { echo "zephyr is not at $ZEPHYR_REV" >&2; exit 1; }
+  [ "$(git -C $WS/modules/lib/zephyr-xenlib rev-parse HEAD)" = "$XENLIB_REV" ] || \
+    { echo "zephyr-xenlib is not at $XENLIB_REV" >&2; exit 1; }
   [ "$(git -C $WS/modules/xaloqi-eds rev-parse HEAD)" = "$EDS_REV" ] || { echo "EDS is not at $EDS_REV" >&2; exit 1; }
   [ "$(git -C $WS/modules/zephyr-virtio-can rev-parse HEAD)" = "$VIRTIO_CAN_REV" ] || \
     { echo "zephyr-virtio-can is not at $VIRTIO_CAN_REV" >&2; exit 1; }
@@ -152,14 +154,14 @@ if [ $VARIANT = can ]; then
   exit 0
 fi
 
-# --- Zephyr: ReferenceBCM (DoIP) for xenvm, Zephyr v4.4.1 --------------------
+# --- Zephyr: ReferenceBCM (DoIP) for xenvm, Zephyr v4.5.0 --------------------
 # The image is stamped with the commits it was built from (run.sh checks the stamp
 # before every boot). An image whose stamp disagrees with the pins is rebuilt.
 # The stamp covers the pinned commits and the app's own inputs (app_hash, the same
 # computation as in run.sh), so a conf or source change cannot pass on an old image.
 STAMP=$OUT/zephyr-domz.stamp
 app_hash() { (cd /src && cat prj.conf CMakeLists.txt boards/xenvm_doip.conf boards/xenvm_doip.overlay src/*.c src/*.h | sha256sum | cut -c1-16); }
-PINS="zephyr=$ZEPHYR_REV eds=$EDS_REV"
+PINS="zephyr=$ZEPHYR_REV xenlib=$XENLIB_REV eds=$EDS_REV"
 WANT="$PINS app=$(app_hash)"
 if [ -f $OUT/zephyr-domz.bin ] && [ "$(cat $STAMP 2>/dev/null)" != "$WANT" ]; then
   log "DomZ image is stale or unstamped (stamp: $(cat $STAMP 2>/dev/null || echo none)); rebuilding"
@@ -169,7 +171,7 @@ fi
 if [ ! -f $OUT/zephyr-domz.bin ]; then
   west_ws
   log "build ReferenceBCM (DoIP) for xenvm"
-  # prj.conf asks for CONFIG_STACK_CANARIES=y. On Zephyr 4.4 that symbol is a
+  # prj.conf asks for CONFIG_STACK_CANARIES=y. On Zephyr 4.4/4.5 that symbol is a
   # member of an optional choice, and a later =n (boards/xenvm_doip.conf) does
   # NOT turn the choice off: canaries stay on, seeded by Zephyr's cycle-counter
   # fallback. So this build uses prj.conf minus that one line, and asserts the
@@ -197,6 +199,7 @@ if [ ! -f $OUT/zephyr-domz.bin ]; then
   grep -iE "warning:" $B/log-zephyr.txt | sort -u | head -20 || true
   cp $B/obj-zephyr/zephyr/zephyr.bin $OUT/zephyr-domz.bin
   # Stamp from the checkouts that were actually compiled, not from versions.env.
-  echo "zephyr=$(git -C $WS/zephyr rev-parse HEAD) eds=$(git -C $WS/modules/xaloqi-eds rev-parse HEAD) app=$(app_hash)" > $STAMP
+  echo "zephyr=$(git -C $WS/zephyr rev-parse HEAD) xenlib=$(git -C $WS/modules/lib/zephyr-xenlib rev-parse HEAD)" \
+       "eds=$(git -C $WS/modules/xaloqi-eds rev-parse HEAD) app=$(app_hash)" > $STAMP
 fi
 log "artifacts:"; ls -l $OUT

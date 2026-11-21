@@ -1,8 +1,9 @@
 # West manifest for the xenvm (Xen guest) variants ONLY (DoIP and CAN).
 #
 # The NUCLEO build stays on Zephyr v3.7.0 (../west.yml). This variant needs
-# Zephyr v4.4.1, the exact SHA SoDeV's DomZ pins, and SDK 1.0.1. Nothing from
-# Zephyr's own west.yml is imported: the xenvm board needs no HAL module.
+# Zephyr v4.5.0 and zephyr-xenlib, at the SHAs SoDeV's Zephyr guests pin
+# (sodev-demo-workspace-rpi, zephyr-dom0-xt v0.4.0), and SDK 1.0.1. Nothing else
+# from Zephyr's own west.yml is imported: the xenvm board needs no HAL module.
 #
 #   west init -l --mf xenvm/west.yml .   (from a directory holding this repo)
 #   west update
@@ -20,9 +21,18 @@ manifest:
   projects:
     - name: zephyr
       remote: zephyrproject-rtos
-      revision: 1f6485eca25431b5ff27ce9a754218c9e559bbbb   # v4.4.1
+      revision: 41d10b59730406bbab4ca9f1fbbe9e96aafb4966   # v4.5.0
       path: zephyr
       west-commands: scripts/west-commands.yml   # west build, without importing modules
+
+    # Since Zephyr 4.5 the Xen public headers (xen/public/...) live in this module,
+    # not in zephyr/include (ZRE#74). Pinned as SoDeV pins it. Zephyr v4.5.0's own
+    # west.yml pins a later commit (8b13d0b7, Xen 4.22.0 headers); we follow SoDeV.
+    # Its Kconfig options are all opt-in: a DomU selects none of them.
+    - name: zephyr-xenlib
+      remote: zephyrproject-rtos
+      revision: 7f0884563f865a2a223f26dd0d847fb0faad397d   # SoDeV's pin
+      path: modules/lib/zephyr-xenlib
 
     - name: EDS
       remote: xaloqi

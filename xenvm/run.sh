@@ -4,7 +4,7 @@
 #
 # xenvm/run.sh: build everything from pinned versions in a container, boot
 # Xen 4.22 + Dom0 + DomD under QEMU, let DomD create DomZ (this ECU, EDS on
-# Zephyr 4.4.1) and talk DoIP to it. The last line is PASS or FAIL; the exit
+# Zephyr 4.5.0) and talk DoIP to it. The last line is PASS or FAIL; the exit
 # status matches. Needs Docker and nothing else on the host (no sudo).
 #
 #   xenvm/run.sh          build what is missing, boot, check
@@ -69,7 +69,7 @@ if [ $VARIANT = can ]; then
   # Both images must match the pins and sources now, as for DoIP. Same
   # computations as app_hash_can and backends_hash in scripts/build-can.sh.
   APP=$(cd "$REPO" && cat prj.conf CMakeLists.txt boards/xenvm_can.conf boards/xenvm_can.overlay boards/xenvm_can_fd.conf src/*.c src/*.h | sha256sum | cut -c1-16)
-  WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX}${XENVM_CAN_FD:+ fd=1} app=$APP"
+  WANT="zephyr=$ZEPHYR_REV xenlib=$XENLIB_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX}${XENVM_CAN_FD:+ fd=1} app=$APP"
   HAVE=$(cat "$BUILD/out/zephyr-domz-can.stamp" 2>/dev/null || echo "none (no CAN image built)")
   if [ "$HAVE" != "$WANT" ]; then
     echo "FAIL: CAN DomZ image was built from [$HAVE], pins and sources are [$WANT]; run xenvm/run.sh can (not boot) to rebuild"
@@ -101,7 +101,7 @@ fi
 STAMP_FILE="$BUILD/out/zephyr-domz.stamp"
 # Same computation as app_hash in scripts/build.sh.
 APP=$(cd "$REPO" && cat prj.conf CMakeLists.txt boards/xenvm_doip.conf boards/xenvm_doip.overlay src/*.c src/*.h | sha256sum | cut -c1-16)
-WANT="zephyr=$ZEPHYR_REV eds=$EDS_REV app=$APP"
+WANT="zephyr=$ZEPHYR_REV xenlib=$XENLIB_REV eds=$EDS_REV app=$APP"
 HAVE=$(cat "$STAMP_FILE" 2>/dev/null || echo "none (no stamp: image built before stamping, or missing)")
 if [ "$HAVE" != "$WANT" ]; then
   echo "FAIL: DomZ image was built from [$HAVE], pins and sources are [$WANT]; run xenvm/run.sh (not boot) to rebuild"

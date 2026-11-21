@@ -53,7 +53,7 @@ fi
 # As for the DoIP image: stamped with the commits compiled and the app's inputs.
 CSTAMP=$OUT/zephyr-domz-can.stamp
 app_hash_can() { (cd /src && cat prj.conf CMakeLists.txt boards/xenvm_can.conf boards/xenvm_can.overlay boards/xenvm_can_fd.conf src/*.c src/*.h | sha256sum | cut -c1-16); }
-PINS="zephyr=$ZEPHYR_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX}${XENVM_CAN_FD:+ fd=1}"
+PINS="zephyr=$ZEPHYR_REV xenlib=$XENLIB_REV eds=$EDS_REV virtio-can=$VIRTIO_CAN_REV${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX}${XENVM_CAN_FD:+ fd=1}"
 WANT="$PINS app=$(app_hash_can)"
 if [ -f $OUT/zephyr-domz-can.bin ] && [ "$(cat $CSTAMP 2>/dev/null)" != "$WANT" ]; then
   log "CAN DomZ image is stale or unstamped (stamp: $(cat $CSTAMP 2>/dev/null || echo none)); rebuilding"
@@ -63,7 +63,7 @@ if [ ! -f $OUT/zephyr-domz-can.bin ]; then
   west_ws
   log "build ReferenceBCM (CAN, virtio-can) for xenvm"
   # The same prj.conf line as the DoIP build is dropped, for the same reason
-  # (STACK_CANARIES is a choice member on Zephyr 4.4; see build.sh).
+  # (STACK_CANARIES is a choice member on Zephyr 4.4/4.5; see build.sh).
   grep -v '^CONFIG_STACK_CANARIES=' /src/prj.conf > $B/prj-xenvm-can.conf
   cd $WS
   west build -p always -b xenvm -s /src -d $B/obj-zephyr-can -- \
@@ -90,7 +90,8 @@ if [ ! -f $OUT/zephyr-domz-can.bin ]; then
     echo "  .config: CONFIG_$sym off"
   done
   cp $B/obj-zephyr-can/zephyr/zephyr.bin $OUT/zephyr-domz-can.bin
-  echo "zephyr=$(git -C $WS/zephyr rev-parse HEAD) eds=$(git -C $WS/modules/xaloqi-eds rev-parse HEAD)" \
+  echo "zephyr=$(git -C $WS/zephyr rev-parse HEAD) xenlib=$(git -C $WS/modules/lib/zephyr-xenlib rev-parse HEAD)" \
+       "eds=$(git -C $WS/modules/xaloqi-eds rev-parse HEAD)" \
        "virtio-can=$(git -C $WS/modules/zephyr-virtio-can rev-parse HEAD)${XENVM_CAN_ECU_INDEX:+ ecu=$XENVM_CAN_ECU_INDEX}${XENVM_CAN_FD:+ fd=1}" \
        "app=$(app_hash_can)" > $CSTAMP
 fi

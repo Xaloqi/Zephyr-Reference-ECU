@@ -368,7 +368,7 @@ at 1.7 ms, then every 100 ms (101.8, 201.9, 302.0, 402.0), final `71 01 F0 F0 0A
 ## As a Xen guest: AGL SoDeV's DomZ, over DoIP or CAN
 
 `xenvm/run.sh` builds Xen 4.22, two Linux domains, QEMU and this ECU (DoIP build,
-Zephyr 4.4.1 `xenvm`), all in a container, and boots them under QEMU. A dom0less driver
+Zephyr 4.5.0 `xenvm`), all in a container, and boots them under QEMU. A dom0less driver
 domain (DomD) creates DomZ from SoDeV's `domz.cfg`, backs its virtio-net and
 virtio-rng, and runs a DoIP tester against it. The script needs Docker only and ends
 in PASS or FAIL. The NUCLEO builds above stay on Zephyr v3.7.0; this variant has its
