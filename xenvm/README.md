@@ -3,7 +3,7 @@
 [![xenvm weekly](https://github.com/Xaloqi/Zephyr-Reference-ECU/actions/workflows/xenvm-weekly.yml/badge.svg?branch=main)](https://github.com/Xaloqi/Zephyr-Reference-ECU/actions/workflows/xenvm-weekly.yml)
 
 `xenvm/run.sh` builds and boots a three-domain Xen system on a PC, under QEMU.
-In DomZ, ReferenceBCM (Xaloqi EDS on Zephyr 4.4.1) answers DoIP from a tester in DomD:
+In DomZ, ReferenceBCM (Xaloqi EDS on Zephyr 4.5.0) answers DoIP from a tester in DomD:
 
 ```
 QEMU virt (arm64, GICv2, TCG)
@@ -13,7 +13,7 @@ QEMU virt (arm64, GICv2, TCG)
    │        QEMU 11.1.2 as the device model (-M xenpvh) and the DoIP tester
    └─ DomZ  created by DomD from AGL SoDeV's domz.cfg + two virtio= entries
             (virtio-net, virtio-rng; backend = DomD, grant_usage = 0)
-            Zephyr 4.4.1 xenvm + EDS: ReferenceBCM, DoIP on 192.0.2.1:13400
+            Zephyr 4.5.0 xenvm + EDS: ReferenceBCM, DoIP on 192.0.2.1:13400
 ```
 
 The run boots DomZ twice. On each boot the tester in DomD sends routing activation,
@@ -56,7 +56,7 @@ QEMU virt (arm64, GICv2, TCG)
    │        rust-vmm vhost-device-can (on vcan0) and vhost-device-rng, behind Linaro's
    │        xen-vhost-frontend (Xen ioreq server, foreign mapping). ISO-TP tester on vcan0
    └─ DomZ  SoDeV's domz.cfg + virtio-can (device 36) + virtio-rng (backend = DomD,
-            grant_usage = 0). Zephyr 4.4.1 xenvm + Xaloqi/zephyr-virtio-can + EDS:
+            grant_usage = 0). Zephyr 4.5.0 xenvm + Xaloqi/zephyr-virtio-can + EDS:
             ReferenceBCM, CAN variant (src/main.c), UDS on 0x7E0/0x7E8
 ```
 
@@ -152,7 +152,7 @@ of cpus`, `getting physinfo: Operation not permitted`, and no DomZ.
 | Transport | virtio-mmio (upstream xl offers only mmio) | DomA uses virtio-pci (their patches 0011/0018/0020) |
 | Console | xenconsoled in DomD, `/tool/xenconsoled/domid = 1` | the same, plus a console seeder their Zephyr xenstore needs |
 | DomZ | SoDeV's `domz.cfg` ([`harness/domz.cfg`](harness/domz.cfg), only the kernel path changed) + `virtio=` | `virtio = []`, no device model |
-| Zephyr | **v4.4.1 `1f6485ec`**, SDK 1.0.1, board `xenvm` (GICv2) | the same SHA |
+| Zephyr | **v4.5.0 `41d10b59`** + zephyr-xenlib `7f088456` (the Xen headers, [ZRE#74](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/74)), SDK 1.0.1, board `xenvm` (GICv2) | the same SHAs |
 | EDS | **v1.30.0** `860cbe1` | not present |
 | Machine | QEMU 10.0 `virt`, cortex-a57, 4 CPUs, 4 GiB, TCG | Raspberry Pi 5 / 4 (Cortex-A76 / A72, GIC-400) |
 
@@ -172,8 +172,9 @@ EDS is pinned to the v1.30.0 release. The committed `generated/` sources call ED
   virtio-rng is a `POST_KERNEL` driver with no ISR API, so Zephyr would seed the canary from
   an LCG over the cycle counter, which only looks like a canary. See
   [`boards/xenvm_doip.conf`](../boards/xenvm_doip.conf).
-- **No watchdog.** `CONFIG_WATCHDOG=n`, EDS's degraded mode, logged at every boot. Zephyr v4.4.1
-  has no Xen watchdog driver (`drivers/watchdog/wdt_xen.c` exists only in Zephyr main).
+- **No watchdog.** `CONFIG_WATCHDOG=n`, EDS's degraded mode, logged at every boot. Zephyr v4.5.0
+  added a Xen watchdog driver (`drivers/watchdog/wdt_xen.c`, `xen,watchdog`); this harness does not
+  enable it yet.
 - **Placeholder keys.** The SecurityAccess keys are EDS's public placeholders, and EDS
   says so at boot. A seed can be requested, and anyone can compute the key.
 - **picolibc, not newlib.** SDK 1.0.1 has no newlib; the conf says so explicitly

@@ -17,7 +17,7 @@ Raspberry Pi 5 (8 GB) + Waveshare 2-CH CAN HAT (2 x MCP2515 on RP1 SPI0, 16 MHz)
    │        rust-vmm vhost-device-can on can0 + vhost-device-rng, behind
    │        xen-vhost-frontend (this layer, patched as in ../patches/)
    ├─ DomZ      SoDeV's stock Zephyr DomZ, untouched
-   └─ DomZ-CAN  ReferenceBCM (EDS) on Zephyr 4.4.1 + Xaloqi/zephyr-virtio-can,
+   └─ DomZ-CAN  ReferenceBCM (EDS) on Zephyr 4.5.0 + Xaloqi/zephyr-virtio-can,
                 ISO 15765-4 ECU 1: request 0x7E1, response 0x7E9
                                             │ can0
    physical bus, 500 kbit/s ════════════════╪═══════════ can1 (tester, DomD)
@@ -65,10 +65,11 @@ Dom0 xenstore server release a destroyed guest itself, sodev-demo-workspace-rpi#
 (`CMake 3.28.0 or higher is required` in the first Dom0 step). Keep the build dir of `xenvm/run.sh can` outside the repository,
 or `zre.rev` says `dirty=1`.
 
-DomZ-CAN stays on Zephyr 4.4.1 (`xenvm/west.yml`), as in B3 and B4, although the Dom0 is on 4.5.0 now: they are separate guests. A
-Zephyr 4.5.0 build of DomZ-CAN (tried 2026-11-17, `ZEPHYR_REV=41d10b59`) stops at `xen/public/hvm/dm_op.h: No such file`:
-4.5 removed `include/zephyr/xen/public`, and its Xen headers come from the `zephyr-xenlib` module, which our `west.yml` does not
-have. The port is not done.
+DomZ-CAN is on Zephyr 4.5.0 + `zephyr-xenlib` (`xenvm/west.yml`, both at SoDeV's SHAs) since
+[ZRE#74](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/74): 4.5 removed `include/zephyr/xen/public`, and its Xen headers
+come from that module. The port is validated on the QEMU path (`xenvm/run.sh can`) only. **The B3–B5 images were built on
+Zephyr 4.4.1** (ZRE `9b5f413` and earlier) and stay reproducible from those commits; an image built from this commit has
+not been on the bench.
 
 `sodev-add.sh` refuses a DomZ image that was not built as ECU 1, or that is stale
 against these sources.
