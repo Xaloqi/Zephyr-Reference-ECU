@@ -237,11 +237,12 @@ and not this ECU's own application logic *through* SOVD), are in
 [below](#firmware-update-over-doip--signed-image-both-refusals-shown).)
 `src/main_doip.c` is a separate,
 alternate entry point — `CMakeLists.txt`'s `DIAG_DOIP_ONLY_BUILD` option
-selects it *instead of* `src/main.c`, never both in the same image. Xaloqi
-EDS ships no example, and no proven architecture, for running CAN and
-DoIP concurrently against the same session/security state safely — EDS's
-own architecture note designed that ("the diagnostic executor") and
-deliberately deferred building it.
+selects it *instead of* `src/main.c`, never both in the same image. It runs
+on EDS's diagnostic executor ([`EDS#197`](https://github.com/Xaloqi/EDS/issues/197)):
+one thread owns the UDS server (dispatches, the 1 ms UDS ticks and this
+application's monitor tick), and the DoIP thread posts its requests to it.
+This repo's CAN build has not moved onto it, so an image still has one
+transport; EDS's `examples/dual_transport_ecu` is the CAN + DoIP reference.
 
 ```bash
 # native_sim (loopback only — reachable from inside the process, not the
@@ -276,11 +277,11 @@ problem — history in
 [`#7`](https://github.com/Xaloqi/Zephyr-Reference-ECU/issues/7).
 
 **Watchdog: the UDS tick path and the DoIP server loop are supervised.**
-The IWDG is armed in `main()` and fed only from the UDS tick task. It
-feeds only while the DoIP server loop has checked in recently, through
-EDS's `eds_doip_set_checkin_callback()`
+The IWDG is armed in `main()` and fed only from the executor thread's
+after-pass hook. It feeds only while the DoIP server loop has checked in
+recently, through EDS's `eds_doip_set_checkin_callback()`
 ([`EDS#399`](https://github.com/Xaloqi/EDS/issues/399)). A hung tick loop,
-a request dispatch hung while holding the UDS locks, or a DoIP server
+a hung request dispatch (all of them run on the executor), or a DoIP server
 thread wedged on its socket or exited all reset the ECU. An idle server
 with no client checks in every 5 s and is not reset. A dead Ethernet link
 is not detected. Boot before `main()` (which waits 1.5–4.1 s for the network)
@@ -293,8 +294,9 @@ on more.
 **ECUReset over DoIP resets.** Before
 [`EDS#434`](https://github.com/Xaloqi/EDS/issues/434), `11 01` answered
 `51 01` and the ECU kept running, because no DoIP path performed the
-deferred reset. EDS's DoIP server now performs it through its platform
-binding (flush, 50 ms grace, reset).
+deferred reset. The diagnostic executor now performs it, once the response
+has been handed to the stack, through `exec_ecu_reset()` in
+`src/main_doip.c` (flush, 50 ms grace, reset).
 
 ### Secure boot — confirmed working, both directions
 

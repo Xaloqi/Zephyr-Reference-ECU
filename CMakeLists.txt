@@ -118,9 +118,9 @@ option(DIAG_SKIP_CODEGEN
 # Option: build the DoIP-only variant (Phase 4) instead of CAN
 #
 # Selects src/main_doip.c instead of src/main.c, and DoIP transport sources
-# instead of ISO-TP/CAN — never both in the same image. See src/main_doip.c's
-# own header comment for why this repo does not attempt to run CAN and DoIP
-# concurrently (EDS ships no proven architecture for it).
+# instead of ISO-TP/CAN — never both in the same image. This repo's CAN build
+# has not moved onto the diagnostic executor, so it does not run CAN and DoIP
+# together (EDS's examples/dual_transport_ecu is the reference for that).
 # ---------------------------------------------------------------------------
 option(DIAG_DOIP_ONLY_BUILD
     "Build the DoIP transport variant (src/main_doip.c) instead of CAN (src/main.c)"
@@ -325,8 +325,9 @@ target_sources(app PRIVATE
 
 # ---------------------------------------------------------------------------
 # Transport-specific entry point and sources — CAN (default) or DoIP
-# (DIAG_DOIP_ONLY_BUILD), never both. See src/main_doip.c's header comment
-# for why this repo does not attempt both transports in one image.
+# (DIAG_DOIP_ONLY_BUILD), never both: this repo's CAN build has not moved
+# onto the diagnostic executor, so it still builds one transport per image
+# (EDS's examples/dual_transport_ecu is the CAN + DoIP reference).
 # ---------------------------------------------------------------------------
 if(DIAG_DOIP_ONLY_BUILD)
     target_sources(app PRIVATE
@@ -334,6 +335,9 @@ if(DIAG_DOIP_ONLY_BUILD)
         ${DIAG_ROOT}/transport/doip/doip_server.c
         ${DIAG_ROOT}/transport/doip/zephyr_lwip.c
         ${DIAG_ROOT}/platform/zephyr/platform_doip.c
+        # [EDS#197] The diagnostic executor owns the UDS server (core/uds_exec.c
+        # is in EDS_SERVICE_SRCS); src/main_doip.c starts it.
+        ${DIAG_ROOT}/platform/zephyr/zephyr_exec.c
     )
     target_compile_definitions(app PRIVATE EDS_DOIP_ONLY_BUILD=1)
 else()
