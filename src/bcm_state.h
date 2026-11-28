@@ -14,7 +14,9 @@
  *          (EDS, wired in src/main.c) is the part they are not.
  *
  * THREADING: bcm_state_monitor_tick() is called from diag_task_entry()'s own
- *          loop in src/main.c — the same thread that dispatches UDS requests
+ *          loop in src/main.c, and from the diagnostic executor's after-pass
+ *          hook in src/main_doip.c (Zephyr-Reference-ECU#77) — in both builds the
+ *          same thread that dispatches UDS requests
  *          (including the 0x2E writes to the two body-state DIDs). Matches
  *          EDS's own examples/vehicle_state_ecu precedent: the generated DID
  *          backing stores have no locking of their own, so a second thread
